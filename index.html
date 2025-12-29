@@ -163,18 +163,35 @@ captureBtn.onclick = () => {
    7) AR (simplificado)
 ========================= */
 function startAR() {
+  function syncCanvasToVideo() {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return false;
+
+    if (canvas.width !== vw) canvas.width = vw;
+    if (canvas.height !== vh) canvas.height = vh;
+    return true;
+  }
+
   const camera = new Camera(video, {
     onFrame: async () => {
-      if (!lensReady) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video,0,0,canvas.width,canvas.height);
-      ctx.drawImage(lensImg, canvas.width/3, canvas.height/3, 200, 80);
+      // Esperar a que el video tenga tamaño real
+      if (!syncCanvasToVideo()) return;
+
+      // Dibujar video
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Dibujar lente solo si la imagen está lista
+      if (!lensImgReady || !lensImg || !lensImg.naturalWidth) return;
+
+      // Overlay simple (igual que tu versión, pero estable)
+      ctx.drawImage(lensImg, canvas.width / 3, canvas.height / 3, 200, 80);
     }
   });
+
   camera.start();
 }
-
 /* =========================
    8) Init
 ========================= */
