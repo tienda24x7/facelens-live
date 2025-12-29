@@ -88,6 +88,7 @@ async function loadClientConfig() {
   /* Cliente */
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
+
     .select("*")
     .eq("slug", slug)
     .limit(1);
