@@ -80,66 +80,104 @@ const nextBtn = document.getElementById("nextBtn");
 const captureBtn = document.getElementById("captureBtn");
 const productBtn = document.getElementById("productBtn");
 
-/* =========================
-   4) Cargar config
-========================= */
+/** =========================
+ *  4) Cargar config desde Supabase
+ *  ========================= */
 async function loadClientConfig() {
-
-  /* Cliente */
+  // 4.1 Cliente (OJO: ahora es clientes_facelens)
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
-
     .select("*")
     .eq("slug", slug)
     .limit(1);
 
-  if (cErr) throw cErr;
-  if (!cData.length) throw new Error("Cliente no existe");
+  if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
+  if (!cData || cData.length === 0)
+    throw new Error(`No existe el cliente para slug: ${slug}`);
 
   cliente = cData[0];
-  const plan = (cliente.plan || "ALL").toUpperCase();
 
-  console.log("PLAN ACTIVO:", plan);
+  // Plan del cliente (ALL / A / B)
+  const plan = (cliente.plan || "ALL").toUpperCase().trim();
 
-  /* Lentes */
+  // 4.2 Plataformas
+  const { data: pData, error: pErr } = await db
+    .from("plataformas")
+    .select("*")
+    .eq("cliente_id", cliente.id)
+    .limit(1);
+
+  if (pErr) throw new Error("Error leyendo plataformas: " + pErr.message);
+  plataformas = (pData && pData[0]) || { web:false, whatsapp:false, redes:false };
+
+  // 4.3 Links
+  const { data: lData, error: lErr } = await db
+    .from("links")
+    .select("*")
+    .eq("cliente_id", cliente.id)
+    .limit(1);
+
+  if (lErr) throw new Error("Error leyendo links: " + lErr.message);
+  links = (lData && lData[0]) || {};
+
+  // 4.4 Lentes activos (FILTRADOS POR PLAN)
   let q = db
     .from("lentes")
     .select("*")
     .eq("cliente_id", cliente.id)
     .eq("activo", true);
 
-  if (plan === "A") q = q.eq("grupo", "A");
-  else if (plan === "B") q = q.eq("grupo", "B");
-  else q = q.in("grupo", ["A","B"]); // ALL
-
-  const { data, error } = await q;
-  if (error) throw error;
-
-  lentes = data || [];
-
-  console.log("LENTES CARGADOS:", lentes.map(l => l.grupo));
-
-  if (!lentes.length) {
-    lentes = [{ nombre_modelo:"Sin lentes", imagen_url:"" }];
+  // Reglas:
+  // - Plan ALL => ve A + B
+  // - Plan A   => ve solo A
+  // - Plan B   => ve solo B
+  if (plan === "A") {
+    q = q.eq("grupo", "A");
+  } else if (plan === "B") {
+    q = q.eq("grupo", "B");
+  } else {
+    q = q.in("grupo", ["A", "B"]);
   }
-}
 
+  const { data: gData, error: gErr } = await q;
+  if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
+
+  lentes = gData || [];
+  if (lentes.length === 0) {
+    lentes = [{ nombre_modelo: "Sin lentes cargados", imagen_url: "" }];
+  }
+
+  console.log("PLAN ACTUAL:", plan);
+  console.log("LENTES CARGADOS:", lentes.length);
+}
 /* =========================
    5) Lentes
 ========================= */
 function loadCurrentLens() {
+  if (!lentes || lentes.length === 0) return;
+
   const lens = lentes[currentIndex];
   modelNameEl.textContent = lens.nombre_modelo || "Modelo";
 
-  if (!lens.imagen_url) return;
+  if (!lens.imagen_url) {
+    lensImgReady = false;
+    return;
+  }
 
+  lensImgReady = false;
   lensImg = new Image();
   lensImg.crossOrigin = "anonymous";
   lensImg.src = lens.imagen_url;
 
-  lensImg.onload = () => lensReady = true;
-}
+  lensImg.onload = () => {
+    lensImgReady = true;
+  };
 
+  lensImg.onerror = () => {
+    lensImgReady = false;
+    console.error("Error cargando imagen del lente:", lens.imagen_url);
+  };
+}
 /* =========================
    6) Navegación
 ========================= */
@@ -160,33 +198,29 @@ captureBtn.onclick = () => {
 };
 
 /* =========================
-   7) AR (simplificado)
+   7) AR (simple y estable)
 ========================= */
 function startAR() {
-  function syncCanvasToVideo() {
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    if (!vw || !vh) return false;
-
-    if (canvas.width !== vw) canvas.width = vw;
-    if (canvas.height !== vh) canvas.height = vh;
-    return true;
-  }
-
   const camera = new Camera(video, {
     onFrame: async () => {
-      // Esperar a que el video tenga tamaño real
-      if (!syncCanvasToVideo()) return;
+      // Ajustar canvas al video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
       // Dibujar video
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Dibujar lente solo si la imagen está lista
-      if (!lensImgReady || !lensImg || !lensImg.naturalWidth) return;
+      // Si el lente NO está listo, no dibujamos nada más
+      if (!lensImgReady || !lensImg) return;
 
-      // Overlay simple (igual que tu versión, pero estable)
-      ctx.drawImage(lensImg, canvas.width / 3, canvas.height / 3, 200, 80);
+      // Dibujo del lente (posición provisoria centrada)
+      const lensWidth = canvas.width * 0.4;
+      const lensHeight = lensWidth * 0.35;
+      const x = (canvas.width - lensWidth) / 2;
+      const y = canvas.height * 0.35;
+
+      ctx.drawImage(lensImg, x, y, lensWidth, lensHeight);
     }
   });
 
