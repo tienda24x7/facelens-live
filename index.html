@@ -196,9 +196,8 @@ captureBtn.onclick = () => {
   a.href = canvas.toDataURL("image/png");
   a.click();
 };
-
 /* =========================
-   7) AR (FaceMesh – tracking estable)
+   7) AR (FaceMesh – ajuste fino realista)
 ========================= */
 function startAR() {
   const faceMesh = new FaceMesh({
@@ -215,17 +214,12 @@ function startAR() {
   });
 
   // Suavizado
-  let sX = null, sY = null, sW = null, sH = null, sA = null;
-  const SMOOTH = 0.85;
-  const lerp = (a, b, t) => a + (b - a) * t;
+  let smoothX = null;
+  let smoothY = null;
+  let smoothA = null;
 
-  function smoothAngle(prev, next, t) {
-    if (prev === null) return next;
-    let diff = next - prev;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    return prev + diff * t;
-  }
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const normAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
   faceMesh.onResults((results) => {
     if (!video.videoWidth || !video.videoHeight) return;
@@ -236,63 +230,63 @@ function startAR() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-    if (!results.multiFaceLandmarks || !results.multiFaceLandmarks[0]) return;
+    const faces = results.multiFaceLandmarks;
+    if (!faces || faces.length === 0) return;
     if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
 
-    const pts = results.multiFaceLandmarks[0];
+    const lm = faces[0];
 
     // Landmarks clave
-    const L_IN = pts[133];   // ojo interno izq
-    const R_IN = pts[362];   // ojo interno der
-    const NOSE = pts[168];   // puente nariz
+    const L = lm[33];   // ojo izquierdo externo
+    const R = lm[263];  // ojo derecho externo
+    const N = lm[168];  // puente de la nariz (CLAVE)
 
-    const toX = (p) => p.x * canvas.width;
-    const toY = (p) => p.y * canvas.height;
+    const lx = L.x * canvas.width;
+    const ly = L.y * canvas.height;
+    const rx = R.x * canvas.width;
+    const ry = R.y * canvas.height;
+    const nx = N.x * canvas.width;
+    const ny = N.y * canvas.height;
 
-    const lx = toX(L_IN);
-    const ly = toY(L_IN);
-    const rx = toX(R_IN);
-    const ry = toY(R_IN);
+    const dx = rx - lx;
+    const dy = ry - ly;
+    const eyeDist = Math.hypot(dx, dy);
 
-    const nx = toX(NOSE);
-    const ny = toY(NOSE);
+    // Rotación real
+    const angle = Math.atan2(dy, dx);
 
-    // Distancia entre ojos internos
-    const eyeDist = Math.hypot(rx - lx, ry - ly);
+    // 👉 Centro REAL del lente (nariz + ajuste)
+    const targetX = nx;
+    const targetY = ny + eyeDist * 0.12; // 🔧 baja lentes al lugar correcto
 
-    // Centro base: puente de nariz
-    let targetX = nx;
-    let targetY = ny + eyeDist * 0.15; // ajuste fino vertical
+    // Suavizado
+    if (smoothX === null) {
+      smoothX = targetX;
+      smoothY = targetY;
+      smoothA = angle;
+    } else {
+      smoothX = lerp(smoothX, targetX, 0.3);
+      smoothY = lerp(smoothY, targetY, 0.3);
 
-    // Rotación
-    const angle = Math.atan2(ry - ly, rx - lx);
+      const da = normAngle(angle - smoothA);
+      smoothA = normAngle(smoothA + da * 0.3);
+    }
 
-    // Tamaño del lente
-    const WIDTH_MULT = 2.2;
-    const targetW = eyeDist * WIDTH_MULT;
+    // Tamaño del lente (más real)
+    const targetW = eyeDist * 2.6; // 🔧 MÁS GRANDE
     const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
     const targetH = targetW * aspect;
 
-    // Suavizado
-    if (sX === null) {
-      sX = targetX;
-      sY = targetY;
-      sW = targetW;
-      sH = targetH;
-      sA = angle;
-    } else {
-      const t = 1 - SMOOTH;
-      sX = lerp(sX, targetX, t);
-      sY = lerp(sY, targetY, t);
-      sW = lerp(sW, targetW, t);
-      sH = lerp(sH, targetH, t);
-      sA = smoothAngle(sA, angle, t);
-    }
-
     ctx.save();
-    ctx.translate(sX, sY);
-    ctx.rotate(sA);
-    ctx.drawImage(lensImg, -sW / 2, -sH / 2, sW, sH);
+    ctx.translate(smoothX, smoothY);
+    ctx.rotate(smoothA);
+    ctx.drawImage(
+      lensImg,
+      -targetW / 2,
+      -targetH / 2,
+      targetW,
+      targetH
+    );
     ctx.restore();
   });
 
