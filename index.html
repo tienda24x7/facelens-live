@@ -267,7 +267,7 @@ captureBtn.onclick = () => {
 // Cambio de categoría
 if (categoryFilter) {
   categoryFilter.onchange = aplicarFiltro;
-}
+
 /* =========================
    7) AR (FaceMesh – ajuste fino realista)
 ========================= */
@@ -379,11 +379,12 @@ function startAR() {
   try {
     await loadClientConfig();
 
-    // Inicializar filtros
-    lentesFiltrados = [...lentes];
-    aplicarFiltro(); // aplica "all" por defecto
+    // 🔹 Inicializar filtros (carga lentesFiltrados)
+    aplicarFiltro();
 
+    // 🔹 Arrancar AR
     startAR();
+
   } catch(e) {
     console.error(e);
     alert(e.message);
