@@ -104,7 +104,11 @@ const productBtn = document.getElementById("productBtn");
  *  4) Cargar config desde Supabase
  *  ========================= */
 async function loadClientConfig() {
-  // 4.1 Cliente (OJO: ahora es clientes_facelens)
+  // ✅ Asegurar db (viene de supabase.js como window.db)
+  const db = window.db;
+  if (!db) throw new Error("Supabase db no está inicializado. Revisá supabase.js y el orden de scripts.");
+
+  // 4.1 Cliente
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
     .select("*")
@@ -128,7 +132,7 @@ async function loadClientConfig() {
     .limit(1);
 
   if (pErr) throw new Error("Error leyendo plataformas: " + pErr.message);
-  plataformas = (pData && pData[0]) || { web:false, whatsapp:false, redes:false };
+  plataformas = (pData && pData[0]) || { web: false, whatsapp: false, redes: false };
 
   // 4.3 Links
   const { data: lData, error: lErr } = await db
@@ -147,10 +151,6 @@ async function loadClientConfig() {
     .eq("cliente_id", cliente.id)
     .eq("activo", true);
 
-  // Reglas:
-  // - Plan ALL => ve A + B
-  // - Plan A   => ve solo A
-  // - Plan B   => ve solo B
   if (plan === "A") {
     q = q.eq("grupo", "A");
   } else if (plan === "B") {
