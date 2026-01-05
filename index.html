@@ -389,21 +389,31 @@ function startAR() {
 
   camera.start();
 }
-/* =========================
-   8) Init
-========================= */
-(async function init(){
-  try {
-    await loadClientConfig();
+  /* =========================
+     8) Init
+  ========================= */
+  (async function init(){
+    try {
+      await loadClientConfig();
 
-    // 🔹 Inicializar filtros (carga lentesFiltrados)
-    aplicarFiltro();
+      // 🔹 Inicializar filtros (carga lentesFiltrados)
+      if (typeof aplicarFiltro === "function") {
+        aplicarFiltro();
+      } else {
+        // fallback si todavía no está el filtro
+        if (typeof lentesFiltrados !== "undefined") lentesFiltrados = [...lentes];
+        if (typeof loadCurrentLens === "function") loadCurrentLens();
+      }
 
-    // 🔹 Arrancar AR
-    startAR();
+      // 🔹 Arrancar AR
+      startAR();
 
-  } catch(e) {
-    console.error(e);
-    alert(e.message);
-  }
-})();
+    } catch(e) {
+      console.error(e);
+      alert(e.message || String(e));
+    }
+  })();
+</script>
+
+</body>
+</html>
