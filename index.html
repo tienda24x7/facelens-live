@@ -179,23 +179,95 @@ function loadCurrentLens() {
   };
 }
 /* =========================
-   6) Navegación
+   6) Navegación + filtros
 ========================= */
-prevBtn.onclick = () => {
-  currentIndex = (currentIndex - 1 + lentes.length) % lentes.length;
+
+let lentesFiltrados = [];
+const categoryFilter = document.getElementById("categoryFilter");
+
+// Inicializa filtros
+function aplicarFiltro() {
+  const categoria = (categoryFilter?.value || "all").toLowerCase();
+
+  if (categoria === "all") {
+    lentesFiltrados = [...lentes];
+  } else {
+    lentesFiltrados = lentes.filter(l =>
+      (l.categoria || "").toLowerCase() === categoria
+    );
+  }
+
+  currentIndex = 0;
+
+  if (lentesFiltrados.length === 0) {
+    modelNameEl.textContent = "Sin lentes en esta categoría";
+    lensImgReady = false;
+    productBtn?.classList.add("hidden");
+    productBtn && (productBtn.onclick = null);
+    return;
+  }
+
   loadCurrentLens();
-};
-nextBtn.onclick = () => {
-  currentIndex = (currentIndex + 1) % lentes.length;
+}
+
+// Usar lentesFiltrados
+function loadCurrentLens() {
+  if (!lentesFiltrados.length) return;
+
+  currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
+  const lens = lentesFiltrados[currentIndex];
+
+  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
+
+  if (!lens.imagen_url) {
+    lensImgReady = false;
+    return;
+  }
+
+  lensImgReady = false;
+  lensImg = new Image();
+  lensImg.crossOrigin = "anonymous";
+  lensImg.src = lens.imagen_url;
+
+  lensImg.onload = () => { lensImgReady = true; };
+  lensImg.onerror = () => { lensImgReady = false; };
+
+  if (productBtn) {
+    if (lens.product_url) {
+      productBtn.classList.remove("hidden");
+      productBtn.onclick = () => window.open(lens.product_url, "_blank");
+    } else {
+      productBtn.classList.add("hidden");
+      productBtn.onclick = null;
+    }
+  }
+}
+
+// Botones
+prevBtn.onclick = () => {
+  if (!lentesFiltrados.length) return;
+  currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
   loadCurrentLens();
 };
 
+nextBtn.onclick = () => {
+  if (!lentesFiltrados.length) return;
+  currentIndex = (currentIndex + 1) % lentesFiltrados.length;
+  loadCurrentLens();
+};
+
+// Captura
 captureBtn.onclick = () => {
   const a = document.createElement("a");
   a.download = "facelens.png";
   a.href = canvas.toDataURL("image/png");
   a.click();
 };
+
+// Cambio de categoría
+if (categoryFilter) {
+  categoryFilter.onchange = aplicarFiltro;
+}
 /* =========================
    7) AR (FaceMesh – ajuste fino realista)
 ========================= */
@@ -306,14 +378,14 @@ function startAR() {
 (async function init(){
   try {
     await loadClientConfig();
-    loadCurrentLens();
+
+    // Inicializar filtros
+    lentesFiltrados = [...lentes];
+    aplicarFiltro(); // aplica "all" por defecto
+
     startAR();
   } catch(e) {
     console.error(e);
     alert(e.message);
   }
 })();
-</script>
-
-</body>
-</html>
