@@ -17,9 +17,10 @@
     #container { position:relative; width:100vw; height:100vh }
     video, canvas { position:absolute; width:100%; height:100%; object-fit:cover }
     #ui { position:fixed; bottom:0; left:0; right:0; padding:12px; background:rgba(0,0,0,.6) }
-    button, select { padding:10px; border:none; border-radius:10px; font-weight:bold }
+    button, select { padding:10px; border:none; border-radius:10px; font-weight:bold; cursor:pointer }
     button.secondary, select { background:#333; color:#fff }
     button.hidden { display:none }
+    #modelName { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   </style>
 </head>
 
@@ -43,31 +44,30 @@
 
   <!-- Navegación -->
   <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
-    <button id="prevBtn" class="secondary">◀</button>
-    <span id="modelName" style="flex:1; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Cargando…</span>
-    <button id="nextBtn" class="secondary">▶</button>
+    <button id="prevBtn" class="secondary" style="min-width:44px;">◀</button>
+    <span id="modelName" style="flex:1; text-align:center;">Cargando…</span>
+    <button id="nextBtn" class="secondary" style="min-width:44px;">▶</button>
   </div>
 
   <!-- Acciones -->
-  <div style="margin-top:10px; display:flex; gap:10px;">
+  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
     <button id="captureBtn" class="secondary">📸 Captura</button>
     <button id="productBtn" class="hidden">🛒 Producto</button>
   </div>
 </div>
 
-<!-- Supabase client (window.db) -->
-<script src="./supabase.js"></script>
-
-<!-- App -->
 <script>
-/* =========================
-   0) Supabase guard
-========================= */
+/* =========================================================
+   0) SUPABASE (SIN "db" GLOBAL PARA EVITAR "already declared")
+   ========================================================= */
+const SUPABASE_URL = "https://romgbrobvperljaviekj.supabase.co";
+const SUPABASE_ANON_KEY = "PEGA_ACA_TU_ANON_KEY_COMPLETA";
+
+// IMPORTANTE: NO declaramos "const db".
+// Usamos SIEMPRE window.db para que nunca choque con otro script.
 if (!window.db) {
-  alert("db is not defined (supabase.js no cargó). Verificá que supabase.js exista y esté en la misma carpeta.");
-  throw new Error("db is not defined");
+  window.db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
-const db = window.db;
 
 /* =========================
    1) Slug
@@ -81,9 +81,6 @@ const slug =
    2) Estado
 ========================= */
 let cliente = null;
-let plataformas = null;
-let links = null;
-
 let lentes = [];
 let lentesFiltrados = [];
 let currentIndex = 0;
@@ -103,48 +100,27 @@ const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
 const captureBtn = document.getElementById("captureBtn");
 const productBtn = document.getElementById("productBtn");
-
 const categoryFilter = document.getElementById("categoryFilter");
 
-/** =========================
- *  4) Cargar config desde Supabase
- *  ========================= */
+/* =========================
+   4) Cargar config desde Supabase
+========================= */
 async function loadClientConfig() {
-  // 4.1 Cliente
-  const { data: cData, error: cErr } = await db
+  // Cliente por slug
+  const { data: cData, error: cErr } = await window.db
     .from("clientes_facelens")
     .select("*")
     .eq("slug", slug)
     .limit(1);
 
   if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
-  if (!cData || cData.length === 0) throw new Error(`No existe el cliente para slug: ${slug}`);
+  if (!cData || cData.length === 0) throw new Error("No existe el cliente para slug: " + slug);
 
   cliente = cData[0];
   const plan = (cliente.plan || "ALL").toUpperCase().trim();
 
-  // 4.2 Plataformas
-  const { data: pData, error: pErr } = await db
-    .from("plataformas")
-    .select("*")
-    .eq("cliente_id", cliente.id)
-    .limit(1);
-
-  if (pErr) throw new Error("Error leyendo plataformas: " + pErr.message);
-  plataformas = (pData && pData[0]) || { web:false, whatsapp:false, redes:false };
-
-  // 4.3 Links
-  const { data: lData, error: lErr } = await db
-    .from("links")
-    .select("*")
-    .eq("cliente_id", cliente.id)
-    .limit(1);
-
-  if (lErr) throw new Error("Error leyendo links: " + lErr.message);
-  links = (lData && lData[0]) || {};
-
-  // 4.4 Lentes activos (FILTRADOS POR PLAN)
-  let q = db
+  // Lentes activos (filtrados por plan)
+  let q = window.db
     .from("lentes")
     .select("*")
     .eq("cliente_id", cliente.id)
@@ -158,16 +134,18 @@ async function loadClientConfig() {
   if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
 
   lentes = gData || [];
-  if (lentes.length === 0) {
-    lentes = [{ nombre_modelo: "Sin lentes cargados", imagen_url: "", categoria: "all" }];
+  lentesFiltrados = [...lentes];
+
+  if (!lentes.length) {
+    modelNameEl.textContent = "Sin lentes cargados";
   }
 
-  console.log("PLAN ACTUAL:", plan);
-  console.log("LENTES CARGADOS:", lentes.length);
+  // inicializa filtro
+  aplicarFiltro();
 }
 
 /* =========================
-   5) Lente actual (usa lentesFiltrados)
+   5) Lente actual
 ========================= */
 function loadCurrentLens() {
   if (!lentesFiltrados.length) return;
@@ -212,7 +190,7 @@ function aplicarFiltro() {
 
   currentIndex = 0;
 
-  if (lentesFiltrados.length === 0) {
+  if (!lentesFiltrados.length) {
     modelNameEl.textContent = "Sin lentes en esta categoría";
     lensImgReady = false;
     productBtn.classList.add("hidden");
@@ -241,16 +219,15 @@ captureBtn.onclick = () => {
   a.click();
 };
 
-if (categoryFilter) {
-  categoryFilter.onchange = aplicarFiltro;
-}
+if (categoryFilter) categoryFilter.onchange = aplicarFiltro;
 
 /* =========================
    7) AR (FaceMesh – ajuste fino realista)
 ========================= */
 function startAR() {
   const faceMesh = new FaceMesh({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
   });
 
   faceMesh.setOptions({
@@ -285,9 +262,9 @@ function startAR() {
     const lm = faces[0];
 
     // Landmarks clave
-    const L = lm[33];   // ojo izquierdo externo
-    const R = lm[263];  // ojo derecho externo
-    const N = lm[168];  // puente de nariz
+    const L = lm[33];
+    const R = lm[263];
+    const N = lm[168];
 
     const lx = L.x * canvas.width;
     const ly = L.y * canvas.height;
@@ -344,7 +321,6 @@ function startAR() {
 (async function init(){
   try {
     await loadClientConfig();
-    aplicarFiltro();   // setea lentesFiltrados + primer lente
     startAR();
   } catch(e) {
     console.error(e);
@@ -355,4 +331,3 @@ function startAR() {
 
 </body>
 </html>
-
