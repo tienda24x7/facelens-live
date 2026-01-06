@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-  <!-- Supabase CDN (OBLIGATORIO) -->
+  <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
@@ -44,7 +44,7 @@
   <!-- Navegación -->
   <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
     <button id="prevBtn" class="secondary">◀</button>
-    <span id="modelName" style="flex:1; text-align:center;">Cargando…</span>
+    <span id="modelName" style="flex:1; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Cargando…</span>
     <button id="nextBtn" class="secondary">▶</button>
   </div>
 
@@ -55,15 +55,20 @@
   </div>
 </div>
 
-<!-- =========================
-     SUPABASE CLIENT (db)
-========================= -->
+<!-- Supabase client (window.db) -->
 <script src="./supabase.js"></script>
 
-<!-- =========================
-     APP
-========================= -->
+<!-- App -->
 <script>
+/* =========================
+   0) Supabase guard
+========================= */
+if (!window.db) {
+  alert("db is not defined (supabase.js no cargó). Verificá que supabase.js exista y esté en la misma carpeta.");
+  throw new Error("db is not defined");
+}
+const db = window.db;
+
 /* =========================
    1) Slug
 ========================= */
@@ -76,10 +81,14 @@ const slug =
    2) Estado
 ========================= */
 let cliente = null;
+let plataformas = null;
+let links = null;
+
 let lentes = [];
 let lentesFiltrados = [];
 let currentIndex = 0;
-let lensImg = new Image();
+
+let lensImg = null;
 let lensImgReady = false;
 
 /* =========================
@@ -88,47 +97,77 @@ let lensImgReady = false;
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+
 const modelNameEl = document.getElementById("modelName");
 const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
 const captureBtn = document.getElementById("captureBtn");
 const productBtn = document.getElementById("productBtn");
+
 const categoryFilter = document.getElementById("categoryFilter");
 
-/* =========================
-   4) Cargar config
-========================= */
+/** =========================
+ *  4) Cargar config desde Supabase
+ *  ========================= */
 async function loadClientConfig() {
-  const { data, error } = await db
+  // 4.1 Cliente
+  const { data: cData, error: cErr } = await db
+    .from("clientes_facelens")
+    .select("*")
+    .eq("slug", slug)
+    .limit(1);
+
+  if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
+  if (!cData || cData.length === 0) throw new Error(`No existe el cliente para slug: ${slug}`);
+
+  cliente = cData[0];
+  const plan = (cliente.plan || "ALL").toUpperCase().trim();
+
+  // 4.2 Plataformas
+  const { data: pData, error: pErr } = await db
+    .from("plataformas")
+    .select("*")
+    .eq("cliente_id", cliente.id)
+    .limit(1);
+
+  if (pErr) throw new Error("Error leyendo plataformas: " + pErr.message);
+  plataformas = (pData && pData[0]) || { web:false, whatsapp:false, redes:false };
+
+  // 4.3 Links
+  const { data: lData, error: lErr } = await db
+    .from("links")
+    .select("*")
+    .eq("cliente_id", cliente.id)
+    .limit(1);
+
+  if (lErr) throw new Error("Error leyendo links: " + lErr.message);
+  links = (lData && lData[0]) || {};
+
+  // 4.4 Lentes activos (FILTRADOS POR PLAN)
+  let q = db
     .from("lentes")
     .select("*")
+    .eq("cliente_id", cliente.id)
     .eq("activo", true);
 
-  if (error) throw error;
+  if (plan === "A") q = q.eq("grupo", "A");
+  else if (plan === "B") q = q.eq("grupo", "B");
+  else q = q.in("grupo", ["A", "B"]);
 
-  lentes = data || [];
-  if (!lentes.length) {
-    lentes = [{ nombre_modelo: "Sin lentes", imagen_url: "" }];
+  const { data: gData, error: gErr } = await q;
+  if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
+
+  lentes = gData || [];
+  if (lentes.length === 0) {
+    lentes = [{ nombre_modelo: "Sin lentes cargados", imagen_url: "", categoria: "all" }];
   }
+
+  console.log("PLAN ACTUAL:", plan);
+  console.log("LENTES CARGADOS:", lentes.length);
 }
 
 /* =========================
-   5) Filtro
-========================= */
-function aplicarFiltro() {
-  const cat = categoryFilter.value;
-
-  lentesFiltrados =
-    cat === "all"
-      ? [...lentes]
-      : lentes.filter(l => (l.categoria || "").toLowerCase() === cat);
-
-  currentIndex = 0;
-  loadCurrentLens();
-}
-
-/* =========================
-   6) Navegación
+   5) Lente actual (usa lentesFiltrados)
 ========================= */
 function loadCurrentLens() {
   if (!lentesFiltrados.length) return;
@@ -137,72 +176,179 @@ function loadCurrentLens() {
   modelNameEl.textContent = lens.nombre_modelo || "Modelo";
 
   lensImgReady = false;
+  productBtn.classList.add("hidden");
+
   if (!lens.imagen_url) return;
 
   lensImg = new Image();
   lensImg.crossOrigin = "anonymous";
   lensImg.src = lens.imagen_url;
-  lensImg.onload = () => lensImgReady = true;
+
+  lensImg.onload = () => (lensImgReady = true);
+  lensImg.onerror = () => {
+    lensImgReady = false;
+    console.warn("No se pudo cargar imagen:", lens.imagen_url);
+  };
 
   if (lens.product_url) {
     productBtn.classList.remove("hidden");
     productBtn.onclick = () => window.open(lens.product_url, "_blank");
-  } else {
-    productBtn.classList.add("hidden");
   }
 }
 
+/* =========================
+   6) Navegación + filtros
+========================= */
+function aplicarFiltro() {
+  const categoria = categoryFilter ? (categoryFilter.value || "all") : "all";
+
+  if (categoria === "all") {
+    lentesFiltrados = [...lentes];
+  } else {
+    lentesFiltrados = lentes.filter(l =>
+      (l.categoria || "").toLowerCase().trim() === categoria
+    );
+  }
+
+  currentIndex = 0;
+
+  if (lentesFiltrados.length === 0) {
+    modelNameEl.textContent = "Sin lentes en esta categoría";
+    lensImgReady = false;
+    productBtn.classList.add("hidden");
+    return;
+  }
+
+  loadCurrentLens();
+}
+
 prevBtn.onclick = () => {
+  if (!lentesFiltrados.length) return;
   currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
   loadCurrentLens();
 };
 
 nextBtn.onclick = () => {
+  if (!lentesFiltrados.length) return;
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens();
 };
 
-categoryFilter.onchange = aplicarFiltro;
-
 captureBtn.onclick = () => {
   const a = document.createElement("a");
-  a.href = canvas.toDataURL("image/png");
   a.download = "facelens.png";
+  a.href = canvas.toDataURL("image/png");
   a.click();
 };
 
-/* =========================
-   7) AR (simple)
-========================= */
-function startAR() {
-  const faceMesh = new FaceMesh({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
-  });
-
-  faceMesh.setOptions({ maxNumFaces: 1, selfieMode: true });
-
-  faceMesh.onResults(r => {
-    if (!r.multiFaceLandmarks || !lensImgReady) return;
-    ctx.drawImage(r.image, 0, 0, canvas.width, canvas.height);
-  });
-
-  const cam = new Camera(video, {
-    onFrame: async () => faceMesh.send({ image: video })
-  });
-  cam.start();
+if (categoryFilter) {
+  categoryFilter.onchange = aplicarFiltro;
 }
 
 /* =========================
-   8) INIT
+   7) AR (FaceMesh – ajuste fino realista)
 ========================= */
-(async () => {
+function startAR() {
+  const faceMesh = new FaceMesh({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+  });
+
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6,
+    selfieMode: true,
+  });
+
+  // Suavizado
+  let smoothX = null;
+  let smoothY = null;
+  let smoothA = null;
+
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const normAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+  faceMesh.onResults((results) => {
+    if (!video.videoWidth || !video.videoHeight) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+    const faces = results.multiFaceLandmarks;
+    if (!faces || faces.length === 0) return;
+    if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
+
+    const lm = faces[0];
+
+    // Landmarks clave
+    const L = lm[33];   // ojo izquierdo externo
+    const R = lm[263];  // ojo derecho externo
+    const N = lm[168];  // puente de nariz
+
+    const lx = L.x * canvas.width;
+    const ly = L.y * canvas.height;
+    const rx = R.x * canvas.width;
+    const ry = R.y * canvas.height;
+    const nx = N.x * canvas.width;
+    const ny = N.y * canvas.height;
+
+    const dx = rx - lx;
+    const dy = ry - ly;
+    const eyeDist = Math.hypot(dx, dy);
+
+    const angle = Math.atan2(dy, dx);
+
+    const targetX = nx;
+    const targetY = ny + eyeDist * 0.06;
+
+    if (smoothX === null) {
+      smoothX = targetX;
+      smoothY = targetY;
+      smoothA = angle;
+    } else {
+      smoothX = lerp(smoothX, targetX, 0.3);
+      smoothY = lerp(smoothY, targetY, 0.3);
+      const da = normAngle(angle - smoothA);
+      smoothA = normAngle(smoothA + da * 0.3);
+    }
+
+    const targetW = eyeDist * 1.75;
+    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+    const targetH = targetW * aspect;
+
+    ctx.save();
+    ctx.translate(smoothX, smoothY);
+    ctx.rotate(smoothA);
+    ctx.drawImage(lensImg, -targetW / 2, -targetH / 2, targetW, targetH);
+    ctx.restore();
+  });
+
+  const camera = new Camera(video, {
+    onFrame: async () => {
+      await faceMesh.send({ image: video });
+    },
+    width: 1280,
+    height: 720,
+  });
+
+  camera.start();
+}
+
+/* =========================
+   8) Init
+========================= */
+(async function init(){
   try {
     await loadClientConfig();
-    aplicarFiltro();
+    aplicarFiltro();   // setea lentesFiltrados + primer lente
     startAR();
-  } catch (e) {
+  } catch(e) {
     console.error(e);
-    alert(e.message);
+    alert(e.message || String(e));
   }
 })();
 </script>
