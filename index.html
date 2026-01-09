@@ -17,10 +17,9 @@
     #container { position:relative; width:100vw; height:100vh }
     video, canvas { position:absolute; width:100%; height:100%; object-fit:cover }
     #ui { position:fixed; bottom:0; left:0; right:0; padding:12px; background:rgba(0,0,0,.6) }
-    button, select { padding:10px; border:none; border-radius:10px; font-weight:bold; cursor:pointer }
+    button, select { padding:10px; border:none; border-radius:10px; font-weight:bold }
     button.secondary, select { background:#333; color:#fff }
     button.hidden { display:none }
-    #modelName { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   </style>
 </head>
 
@@ -32,7 +31,6 @@
 </div>
 
 <div id="ui">
-  <!-- Filtro -->
   <select id="categoryFilter">
     <option value="all">Todos</option>
     <option value="clasicos">Clásicos</option>
@@ -42,141 +40,164 @@
     <option value="ferrari">Ferrari</option>
   </select>
 
-  <!-- Navegación -->
   <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
-    <button id="prevBtn" class="secondary" style="min-width:44px;">◀</button>
-    <span id="modelName" style="flex:1; text-align:center;">Cargando…</span>
-    <button id="nextBtn" class="secondary" style="min-width:44px;">▶</button>
+    <button id="prevBtn" class="secondary">◀</button>
+    <span id="modelName" style="flex:1; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+      Cargando…
+    </span>
+    <button id="nextBtn" class="secondary">▶</button>
   </div>
 
-  <!-- Acciones -->
-  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-    <button id="captureBtn" class="secondary">📸 Captura</button>
-    <button id="productBtn" class="hidden">🛒 Producto</button>
-  </div>
+ <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+  <button id="captureBtn" class="secondary">📸 Captura</button>
+
+  <!-- Botón 1: Ir al producto (ver ficha) -->
+  <button id="productBtn" class="hidden">🔎 Ver producto</button>
+
+  <!-- Botón 2: Comprar (link directo al checkout / carrito si existe) -->
+  <button id="buyBtn" class="hidden">🛒 Comprar</button>
+</div>
 </div>
 
 <script>
-/* =========================================================
-   0) SUPABASE (SIN "db" GLOBAL PARA EVITAR "already declared")
-   ========================================================= */
 const SUPABASE_URL = "https://romgbrobvperljaviekj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvbWdicm9idnBlcmxqYXZpZWtqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MTQ1MTMsImV4cCI6MjA4MjI5MDUxM30.WIpN_Hj0C70bD3Q-Bnxk4tfdgJRr8NnQwmJdM3C5HuI";
 
-// IMPORTANTE: NO declaramos "const db".
-// Usamos SIEMPRE window.db para que nunca choque con otro script.
-if (!window.db) {
-  window.db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-}
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
+/* =========================
+     1) Slug
+  ========================= */
+  const slug =
+    new URLSearchParams(location.search).get("slug") ||
+    location.pathname.replace("/", "") ||
+    "tienda24x7_demo";
+
+  /* =========================
+     2) Estado
+  ========================= */
+  let cliente = null;
+  let plataformas = { web:false, whatsapp:false, redes:false };
+  let links = {};
+  let lentes = [];
+  let lentesFiltrados = [];
+  let currentIndex = 0;
+
+  let lensImg = null;
+  let lensImgReady = false;
+
+  /* =========================
+     3) UI
+  ========================= */
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const modelNameEl = document.getElementById("modelName");
+  const prevBtn = document.getElementById("prevBtn");
+  const nextBtn = document.getElementById("nextBtn");
+  const captureBtn = document.getElementById("captureBtn");
+  const productBtn = document.getElementById("productBtn");
+  const categoryFilter = document.getElementById("categoryFilter");
+
+  /* =========================
+     4) Cargar config desde Supabase
+  ========================= */
+  async function loadClientConfig() {
+    // 4.1 Cliente
+    const { data: cData, error: cErr } = await db
+      .from("clientes_facelens")
+      .select("*")
+      .eq("slug", slug)
+      .limit(1);
+
+    if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
+    if (!cData || cData.length === 0) throw new Error(`No existe el cliente para slug: ${slug}`);
+
+    cliente = cData[0];
+    const plan = (cliente.plan || "ALL").toUpperCase().trim();
+
+    // 4.2 Plataformas
+    const { data: pData, error: pErr } = await db
+      .from("plataformas")
+      .select("*")
+      .eq("cliente_id", cliente.id)
+      .limit(1);
+
+    if (pErr) throw new Error("Error leyendo plataformas: " + pErr.message);
+    plataformas = (pData && pData[0]) || { web:false, whatsapp:false, redes:false };
+
+    // 4.3 Links
+    const { data: lData, error: lErr } = await db
+      .from("links")
+      .select("*")
+      .eq("cliente_id", cliente.id)
+      .limit(1);
+
+    if (lErr) throw new Error("Error leyendo links: " + lErr.message);
+    links = (lData && lData[0]) || {};
+
+    // 4.4 Lentes activos (FILTRADOS POR PLAN)
+    let q = db
+      .from("lentes")
+      .select("*")
+      .eq("cliente_id", cliente.id)
+      .eq("activo", true);
+
+    if (plan === "A") q = q.eq("grupo", "A");
+    else if (plan === "B") q = q.eq("grupo", "B");
+    else q = q.in("grupo", ["A","B"]);
+
+    const { data: gData, error: gErr } = await q;
+    if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
+
+    lentes = gData || [];
+    if (lentes.length === 0) {
+      lentes = [{ nombre_modelo: "Sin lentes cargados", imagen_url: "", categoria: "all" }];
+    }
+
+    console.log("PLAN ACTUAL:", plan);
+    console.log("LENTES CARGADOS:", lentes.length);
+  }
+
+  /* =========================
+     5) Lentes UI
+  ========================= */
+  function loadCurrentLens() {
+    if (!lentesFiltrados.length) return;
+
+    const lens = lentesFiltrados[currentIndex];
+    modelNameEl.textContent = lens.nombre_modelo || "Modelo";
+
+    lensImgReady = false;
+    productBtn.classList.add("hidden");
+
+    if (!lens.imagen_url) return;
+
+    lensImg = new Image();
+    lensImg.crossOrigin = "anonymous";
+    lensImg.src = lens.imagen_url;
+
+    lensImg.onload = () => (lensImgReady = true);
+    lensImg.onerror = () => {
+      lensImgReady = false;
+      console.warn("No se pudo cargar imagen:", lens.imagen_url);
+    };
+
+    if (lens.product_url) {
+      productBtn.classList.remove("hidden");
+      productBtn.onclick = () => window.open(lens.product_url, "_blank");
+    }
+  }
 
 /* =========================
-   1) Slug
+   6) Navegación + filtro (SIN romper loadCurrentLens)
 ========================= */
-const slug =
-  new URLSearchParams(location.search).get("slug") ||
-  location.pathname.replace("/", "") ||
-  "tienda24x7_demo";
 
-/* =========================
-   2) Estado
-========================= */
-let cliente = null;
-let lentes = [];
 let lentesFiltrados = [];
-let currentIndex = 0;
-
-let lensImg = null;
-let lensImgReady = false;
-
-/* =========================
-   3) UI
-========================= */
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-
-const modelNameEl = document.getElementById("modelName");
-const prevBtn = document.getElementById("prevBtn");
-const nextBtn = document.getElementById("nextBtn");
-const captureBtn = document.getElementById("captureBtn");
-const productBtn = document.getElementById("productBtn");
 const categoryFilter = document.getElementById("categoryFilter");
 
-/* =========================
-   4) Cargar config desde Supabase
-========================= */
-async function loadClientConfig() {
-  // Cliente por slug
-  const { data: cData, error: cErr } = await window.db
-    .from("clientes_facelens")
-    .select("*")
-    .eq("slug", slug)
-    .limit(1);
-
-  if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
-  if (!cData || cData.length === 0) throw new Error("No existe el cliente para slug: " + slug);
-
-  cliente = cData[0];
-  const plan = (cliente.plan || "ALL").toUpperCase().trim();
-
-  // Lentes activos (filtrados por plan)
-  let q = window.db
-    .from("lentes")
-    .select("*")
-    .eq("cliente_id", cliente.id)
-    .eq("activo", true);
-
-  if (plan === "A") q = q.eq("grupo", "A");
-  else if (plan === "B") q = q.eq("grupo", "B");
-  else q = q.in("grupo", ["A", "B"]);
-
-  const { data: gData, error: gErr } = await q;
-  if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
-
-  lentes = gData || [];
-  lentesFiltrados = [...lentes];
-
-  if (!lentes.length) {
-    modelNameEl.textContent = "Sin lentes cargados";
-  }
-
-  // inicializa filtro
-  aplicarFiltro();
-}
-
-/* =========================
-   5) Lente actual
-========================= */
-function loadCurrentLens() {
-  if (!lentesFiltrados.length) return;
-
-  const lens = lentesFiltrados[currentIndex];
-  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
-
-  lensImgReady = false;
-  productBtn.classList.add("hidden");
-
-  if (!lens.imagen_url) return;
-
-  lensImg = new Image();
-  lensImg.crossOrigin = "anonymous";
-  lensImg.src = lens.imagen_url;
-
-  lensImg.onload = () => (lensImgReady = true);
-  lensImg.onerror = () => {
-    lensImgReady = false;
-    console.warn("No se pudo cargar imagen:", lens.imagen_url);
-  };
-
-  if (lens.product_url) {
-    productBtn.classList.remove("hidden");
-    productBtn.onclick = () => window.open(lens.product_url, "_blank");
-  }
-}
-
-/* =========================
-   6) Navegación + filtros
-========================= */
+// Aplica filtro y reinicia índice
 function aplicarFiltro() {
   const categoria = categoryFilter ? (categoryFilter.value || "all") : "all";
 
@@ -193,13 +214,51 @@ function aplicarFiltro() {
   if (!lentesFiltrados.length) {
     modelNameEl.textContent = "Sin lentes en esta categoría";
     lensImgReady = false;
-    productBtn.classList.add("hidden");
+    if (productBtn) productBtn.classList.add("hidden");
     return;
   }
 
-  loadCurrentLens();
+  loadCurrentLens(); // usa el override de abajo
 }
 
+// ✅ Override de loadCurrentLens SOLO para trabajar con lentesFiltrados
+function loadCurrentLens() {
+  if (!lentesFiltrados.length) return;
+
+  // normaliza índice
+  currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
+
+  const lens = lentesFiltrados[currentIndex] || {};
+  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
+
+  lensImgReady = false;
+  if (productBtn) productBtn.classList.add("hidden");
+
+  if (!lens.imagen_url) return;
+
+  lensImg = new Image();
+  lensImg.crossOrigin = "anonymous";
+  lensImg.src = lens.imagen_url;
+
+  lensImg.onload = () => { lensImgReady = true; };
+  lensImg.onerror = () => {
+    lensImgReady = false;
+    console.warn("No se pudo cargar imagen:", lens.imagen_url);
+  };
+
+  // Botón producto
+  if (productBtn) {
+    if (lens.product_url) {
+      productBtn.classList.remove("hidden");
+      productBtn.onclick = () => window.open(lens.product_url, "_blank");
+    } else {
+      productBtn.classList.add("hidden");
+      productBtn.onclick = null;
+    }
+  }
+}
+
+// Botones navegación
 prevBtn.onclick = () => {
   if (!lentesFiltrados.length) return;
   currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
@@ -212,6 +271,7 @@ nextBtn.onclick = () => {
   loadCurrentLens();
 };
 
+// Captura
 captureBtn.onclick = () => {
   const a = document.createElement("a");
   a.download = "facelens.png";
@@ -219,10 +279,12 @@ captureBtn.onclick = () => {
   a.click();
 };
 
-if (categoryFilter) categoryFilter.onchange = aplicarFiltro;
-
-/* =========================
-   7) AR (FaceMesh – ajuste fino realista)
+// Cambio de categoría
+if (categoryFilter) {
+  categoryFilter.onchange = aplicarFiltro;
+}
+  /* =========================
+   7) AR (FaceMesh – anti-temblor PRO: smoothing + deadzone + snap reset)
 ========================= */
 function startAR() {
   const faceMesh = new FaceMesh({
@@ -233,18 +295,39 @@ function startAR() {
   faceMesh.setOptions({
     maxNumFaces: 1,
     refineLandmarks: true,
-    minDetectionConfidence: 0.6,
-    minTrackingConfidence: 0.6,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7,
     selfieMode: true,
   });
 
   // Suavizado
-  let smoothX = null;
-  let smoothY = null;
-  let smoothA = null;
+  let sX = null, sY = null, sW = null, sH = null, sA = null;
+
+  // Más alto = menos temblor (más “pesado”)
+  const SMOOTH_POS  = 0.94;
+  const SMOOTH_SIZE = 0.92;
+  const SMOOTH_ANG  = 0.90;
 
   const lerp = (a, b, t) => a + (b - a) * t;
-  const normAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+  function smoothAngle(prev, next, t) {
+    if (prev == null) return next;
+    let diff = next - prev;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    return prev + diff * t;
+  }
+
+  // Zona muerta (ignora micro-jitter)
+  function deadzone(prev, next, dz) {
+    if (prev == null) return next;
+    return Math.abs(next - prev) < dz ? prev : next;
+  }
+
+  // Deadzone en px y radianes
+  const DZ_POS_PX = 2.0;        // 1.5–3.0
+  const DZ_SIZE_PX = 1.5;       // 1.0–2.5
+  const DZ_ANG_RAD = 0.012;     // ~0.7°
 
   faceMesh.onResults((results) => {
     if (!video.videoWidth || !video.videoHeight) return;
@@ -256,12 +339,17 @@ function startAR() {
     ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
     const faces = results.multiFaceLandmarks;
-    if (!faces || faces.length === 0) return;
+    if (!faces || faces.length === 0) {
+      // Reset si se pierde la cara
+      sX = sY = sW = sH = sA = null;
+      return;
+    }
+
     if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
 
     const lm = faces[0];
 
-    // Landmarks clave
+    // Landmarks
     const L = lm[33];
     const R = lm[263];
     const N = lm[168];
@@ -279,28 +367,52 @@ function startAR() {
 
     const angle = Math.atan2(dy, dx);
 
-    const targetX = nx;
-    const targetY = ny + eyeDist * 0.06;
+    // Centro: nariz + ajuste
+    let targetX = nx;
+    let targetY = ny + eyeDist * 0.06;
 
-    if (smoothX === null) {
-      smoothX = targetX;
-      smoothY = targetY;
-      smoothA = angle;
-    } else {
-      smoothX = lerp(smoothX, targetX, 0.3);
-      smoothY = lerp(smoothY, targetY, 0.3);
-      const da = normAngle(angle - smoothA);
-      smoothA = normAngle(smoothA + da * 0.3);
+    // Tamaño
+    let targetW = eyeDist * 1.75;
+    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+    let targetH = targetW * aspect;
+
+    // -------- Deadzone (antes de suavizar) --------
+    targetX = deadzone(sX, targetX, DZ_POS_PX);
+    targetY = deadzone(sY, targetY, DZ_POS_PX);
+    targetW = deadzone(sW, targetW, DZ_SIZE_PX);
+    targetH = deadzone(sH, targetH, DZ_SIZE_PX);
+    // ángulo: deadzone por diferencia angular
+    if (sA != null) {
+      let diff = angle - sA;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      if (Math.abs(diff) < DZ_ANG_RAD) {
+        // no cambia
+      } else {
+        // se permite
+      }
     }
 
-    const targetW = eyeDist * 1.75;
-    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
-    const targetH = targetW * aspect;
+    // -------- Suavizado --------
+    if (sX == null) {
+      sX = targetX; sY = targetY; sW = targetW; sH = targetH; sA = angle;
+    } else {
+      const tp = 1 - SMOOTH_POS;
+      const ts = 1 - SMOOTH_SIZE;
+      const ta = 1 - SMOOTH_ANG;
 
+      sX = lerp(sX, targetX, tp);
+      sY = lerp(sY, targetY, tp);
+      sW = lerp(sW, targetW, ts);
+      sH = lerp(sH, targetH, ts);
+      sA = smoothAngle(sA, angle, ta);
+    }
+
+    // Dibujo
     ctx.save();
-    ctx.translate(smoothX, smoothY);
-    ctx.rotate(smoothA);
-    ctx.drawImage(lensImg, -targetW / 2, -targetH / 2, targetW, targetH);
+    ctx.translate(sX, sY);
+    ctx.rotate(sA);
+    ctx.drawImage(lensImg, -sW / 2, -sH / 2, sW, sH);
     ctx.restore();
   });
 
@@ -314,14 +426,19 @@ function startAR() {
 
   camera.start();
 }
-
 /* =========================
    8) Init
 ========================= */
 (async function init(){
   try {
     await loadClientConfig();
+
+    // Inicializa el filtro apenas cargan los lentes
+    aplicarFiltro();
+
+    // Arrancar AR
     startAR();
+
   } catch(e) {
     console.error(e);
     alert(e.message || String(e));
