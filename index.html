@@ -87,19 +87,69 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   let lensImgReady = false;
 
   /* =========================
-     3) UI
-  ========================= */
-  const video = document.getElementById("video");
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
+   UI
+========================= */
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
-  const modelNameEl = document.getElementById("modelName");
-  const prevBtn = document.getElementById("prevBtn");
-  const nextBtn = document.getElementById("nextBtn");
-  const captureBtn = document.getElementById("captureBtn");
-  const productBtn = document.getElementById("productBtn");
-  const categoryFilter = document.getElementById("categoryFilter");
+const modelNameEl = document.getElementById("modelName");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
+const captureBtn = document.getElementById("captureBtn");
 
+const productBtn = document.getElementById("productBtn");
+const buyBtn = document.getElementById("buyBtn");
+
+const categoryFilter = document.getElementById("categoryFilter");
+
+/* =========================
+   LENTES
+========================= */
+function setButton(btn, visible, text, onClick) {
+  if (!btn) return;
+  if (!visible) {
+    btn.classList.add("hidden");
+    btn.onclick = null;
+    return;
+  }
+  btn.classList.remove("hidden");
+  if (text) btn.textContent = text;
+  btn.onclick = onClick || null;
+}
+
+// Regla simple:
+// - product_url => "Ver producto"
+// - buy_url     => "Comprar" (si no existe, oculto)
+// Si hoy no tenés buy_url, lo dejamos listo y no rompe nada.
+function loadCurrentLens() {
+  if (!lentesFiltrados.length) return;
+
+  const lens = lentesFiltrados[currentIndex] || {};
+  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
+
+  lensImgReady = false;
+
+  // Botones de venta
+  const productUrl = (lens.product_url || "").trim();
+  const buyUrl = (lens.buy_url || "").trim(); // ✅ preparado para el futuro
+
+  setButton(productBtn, !!productUrl, "🔎 Ver producto", () => window.open(productUrl, "_blank"));
+  setButton(buyBtn, !!buyUrl, "🛒 Comprar", () => window.open(buyUrl, "_blank"));
+
+  // Imagen lente
+  if (!lens.imagen_url) return;
+
+  lensImg = new Image();
+  lensImg.crossOrigin = "anonymous";
+  lensImg.src = lens.imagen_url;
+
+  lensImg.onload = () => (lensImgReady = true);
+  lensImg.onerror = () => {
+    lensImgReady = false;
+    console.warn("No se pudo cargar imagen:", lens.imagen_url);
+  };
+}
   /* =========================
      4) Cargar config desde Supabase
   ========================= */
