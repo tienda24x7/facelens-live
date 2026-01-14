@@ -11,7 +11,6 @@
 
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
 
   <style>
     body { margin:0; background:#0f0f0f; color:#fff; font-family:Arial }
@@ -26,40 +25,40 @@
 </head>
 
 <body>
-<div id="container">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
-</div>
-
-<div id="ui">
-  <!-- Filtro -->
-  <select id="categoryFilter" style="width:100%;">
-    <option value="all">Todos</option>
-    <option value="clasicos">Clásicos</option>
-    <option value="degrade">Degradé</option>
-    <option value="espejados">Espejados</option>
-    <option value="polarizados">Polarizados</option>
-    <option value="ferrari">Ferrari</option>
-  </select>
-
-  <!-- Navegación -->
-  <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
-    <button id="prevBtn" class="secondary" style="min-width:44px;">◀</button>
-    <span id="modelName">Cargando…</span>
-    <button id="nextBtn" class="secondary" style="min-width:44px;">▶</button>
+  <div id="container">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
   </div>
 
-  <!-- Acciones -->
-  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-    <button id="captureBtn" class="secondary">📸 Captura</button>
-    <button id="productBtn" class="hidden">🛒 Ver producto</button>
-  </div>
-</div>
+  <div id="ui">
+    <!-- Filtro -->
+    <select id="categoryFilter" style="width:100%;">
+      <option value="all">Todos</option>
+      <option value="clasicos">Clásicos</option>
+      <option value="degrade">Degradé</option>
+      <option value="espejados">Espejados</option>
+      <option value="polarizados">Polarizados</option>
+      <option value="ferrari">Ferrari</option>
+    </select>
 
-<script>
-/* =========================
-   0) SUPABASE
-========================= */
+    <!-- Navegación -->
+    <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
+      <button id="prevBtn" class="secondary" style="min-width:44px;">◀</button>
+      <span id="modelName">Cargando…</span>
+      <button id="nextBtn" class="secondary" style="min-width:44px;">▶</button>
+    </div>
+
+    <!-- Acciones -->
+    <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button id="captureBtn" class="secondary">📸 Captura</button>
+      <button id="productBtn" class="hidden">🛒 Ver producto</button>
+    </div>
+  </div>
+
+  <script>
+  /* =========================
+     0) SUPABASE
+  ========================= */
 const SUPABASE_URL = "https://romgbrobvperljaviekj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvbWdicm9idnBlcmxqYXZpZWtqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MTQ1MTMsImV4cCI6MjA4MjI5MDUxM30.WIpN_Hj0C70bD3Q-Bnxk4tfdgJRr8NnQwmJdM3C5HuI";
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -308,16 +307,35 @@ function startAR() {
 
   camera.start();
 }
-
-/* =========================
-   8) INIT
-========================= */
+<!-- =========================
+     INIT FINAL
+========================= -->
+<script>
 (async function init(){
   try {
-    console.log("INIT ✅", { slug });
+    console.log("INIT ✅ arrancó");
+
+    // seguridad básica
+    if (typeof loadClientConfig !== "function") {
+      throw new Error("loadClientConfig() no está definida (orden incorrecto de scripts)");
+    }
+    if (typeof startAR !== "function") {
+      throw new Error("startAR() no está definida (orden incorrecto de scripts)");
+    }
+
     await loadClientConfig();
-    aplicarFiltro();   // arranca con el filtro actual (por default "Todos")
+    console.log("loadClientConfig ✅ OK");
+
+    if (typeof aplicarFiltro === "function") {
+      aplicarFiltro();
+      console.log("aplicarFiltro ✅ OK");
+    } else {
+      console.warn("aplicarFiltro() no existe, continúo sin filtro");
+    }
+
     startAR();
+    console.log("startAR ✅ OK");
+
   } catch (e) {
     console.error("INIT ❌", e);
     alert(e.message || String(e));
@@ -327,4 +345,3 @@ function startAR() {
 
 </body>
 </html>
-
