@@ -315,7 +315,6 @@ function startAR() {
   try {
     console.log("INIT ✅ arrancó");
 
-    // seguridad básica
     if (typeof loadClientConfig !== "function") {
       throw new Error("loadClientConfig() no está definida (orden incorrecto de scripts)");
     }
