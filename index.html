@@ -307,39 +307,40 @@ function startAR() {
 
   camera.start();
 }
-<!-- =========================
+/* =========================
      INIT
-========================= -->
-<script>
-(async function init(){
-  try {
-    console.log("INIT ✅ arrancó");
+  ========================= */
+  (async function () {
+    try {
+      console.log("INIT ✅ arrancó");
 
-    if (typeof loadClientConfig !== "function") {
-      throw new Error("loadClientConfig() no está definida (orden incorrecto de scripts)");
+      if (typeof loadClientConfig !== "function") {
+        throw new Error("loadClientConfig() no está definida");
+      }
+
+      if (typeof startAR !== "function") {
+        throw new Error("startAR() no está definida");
+      }
+
+      await loadClientConfig();
+      console.log("loadClientConfig ✅ OK");
+
+      if (typeof aplicarFiltro === "function") {
+        aplicarFiltro();
+        console.log("aplicarFiltro ✅ OK");
+      } else if (typeof loadCurrentLens === "function") {
+        loadCurrentLens();
+        console.log("loadCurrentLens (sin filtro) ✅ OK");
+      }
+
+      startAR();
+      console.log("startAR ✅ OK");
+
+    } catch (e) {
+      console.error("INIT ❌", e);
+      alert(e.message || String(e));
     }
-    if (typeof startAR !== "function") {
-      throw new Error("startAR() no está definida (orden incorrecto de scripts)");
-    }
-
-    await loadClientConfig();
-    console.log("loadClientConfig ✅ OK");
-
-    if (typeof aplicarFiltro === "function") {
-      aplicarFiltro();
-      console.log("aplicarFiltro ✅ OK");
-    } else {
-      console.warn("aplicarFiltro() no existe, continúo sin filtro");
-    }
-
-    startAR();
-    console.log("startAR ✅ OK");
-
-  } catch (e) {
-    console.error("INIT ❌", e);
-    alert(e.message || String(e));
-  }
-})();
+  })();
 </script>
 
 </body>
