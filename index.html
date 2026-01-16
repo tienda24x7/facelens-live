@@ -288,7 +288,7 @@ function startAR() {
     }
 
     // tamaño estable usando eyeDist suavizado
-    const targetW = smoothD * 1.55;
+    const targetW = Math.min (smoothD * 1.85, 320);
     const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
     const targetH = targetW * aspect;
 
