@@ -176,14 +176,30 @@ function loadCurrentLens() {
 
   modelNameEl.textContent = lens.nombre_modelo || "Modelo";
 
-  // Botón producto
-  const url = lens.product_url || lens.productUrl || "";
-  if (url) {
+  // ✅ Botón VER PRODUCTO:
+  // 1) Si existe url_del_producto => abre esa URL (web o Mercado Libre)
+  // 2) Si NO existe => abre WhatsApp del cliente
+  const urlProducto = (lens.url_del_producto || "").trim();
+
+  if (urlProducto) {
     productBtn.classList.remove("hidden");
-    productBtn.onclick = () => window.open(url, "_blank");
+    productBtn.textContent = "🛒 Ver producto";
+    productBtn.onclick = () => window.open(urlProducto, "_blank");
   } else {
-    productBtn.classList.add("hidden");
-    productBtn.onclick = null;
+    // fallback WhatsApp del cliente
+    const num = String(links?.whatsapp_numero || "").replace(/\D/g, "");
+    if (num) {
+      const msgBase = links?.whatsapp_mensaje || "Hola! Me interesa este modelo:";
+      const msg = `${msgBase}\nModelo: ${lens.nombre_modelo || ""}`;
+      const wa = `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+
+      productBtn.classList.remove("hidden");
+      productBtn.textContent = "🟢 Consultar por WhatsApp";
+      productBtn.onclick = () => window.open(wa, "_blank");
+    } else {
+      productBtn.classList.add("hidden");
+      productBtn.onclick = null;
+    }
   }
 
   // Imagen
@@ -195,7 +211,10 @@ function loadCurrentLens() {
   lensImg.src = lens.imagen_url;
 
   lensImg.onload = () => { lensImgReady = true; };
-  lensImg.onerror = () => { lensImgReady = false; console.warn("No cargó imagen:", lens.imagen_url); };
+  lensImg.onerror = () => {
+    lensImgReady = false;
+    console.warn("No cargó imagen:", lens.imagen_url);
+  };
 }
 
 /* Navegación */
