@@ -213,7 +213,6 @@ categoryFilter.onchange = aplicarFiltro;
 
 // Helpers
 function normalizePhone(phone) {
-  // deja solo números (para wa.me)
   return String(phone || "").replace(/[^\d]/g, "");
 }
 
@@ -221,35 +220,22 @@ function buildWhatsAppUrl(phone, lens) {
   const p = normalizePhone(phone);
   if (!p) return "";
 
-  const model = (lens && (lens.nombre_modelo || lens.nombre || lens.model || "") || "").trim();
+  const model = String(lens?.nombre_modelo || lens?.nombre || lens?.model || "").trim();
   const msg = model
     ? `Hola! Quiero consultar por el modelo: ${model}`
     : `Hola! Quiero consultar por un modelo de lentes.`;
 
-  // Si tu número viene sin 54, lo agregamos (Argentina) solo si NO lo trae
   const p54 = p.startsWith("54") ? p : `54${p}`;
-
   return `https://wa.me/${p54}?text=${encodeURIComponent(msg)}`;
 }
 
 function pickFirstUrl(lens) {
-  // 1) si el lente trae objeto "links", lo usamos
   const lobj = (lens && typeof lens.links === "object" && lens.links) ? lens.links : null;
 
   const candidates = [
-    lobj?.web,
-    lobj?.tienda,
-    lobj?.ml,
-    lobj?.mercadolibre,
-
-    lens?.web_url,
-    lens?.tienda_url,
-    lens?.ml_url,
-    lens?.mercadolibre_url,
-
-    lens?.product_url,
-    lens?.productUrl,
-    lens?.url,
+    lobj?.web, lobj?.tienda, lobj?.ml, lobj?.mercadolibre,
+    lens?.web_url, lens?.tienda_url, lens?.ml_url, lens?.mercadolibre_url,
+    lens?.product_url, lens?.productUrl, lens?.url,
   ];
 
   for (const u of candidates) {
@@ -258,53 +244,50 @@ function pickFirstUrl(lens) {
   return "";
 }
 
-/**
- * Devuelve el whatsapp del cliente desde window.__client
- */
 function getClientWhatsApp() {
   const c = window.__client || {};
   return (
     c.whatsapp ||
     c.whatsapp_number ||
     c.whatsappNumber ||
+    c.numero_whatsapp ||
+    c.numeroWhatsapp ||
     c.phone ||
     c.telefono ||
     c.celular ||
     c.mobile ||
-    c.numero_whatsapp ||
-    c.numeroWhatsapp ||
-    window.clientWhatsapp ||
-    window.clientWhatsApp ||
     ""
   );
 }
 
+// ✅ MUY IMPORTANTE: no tocar currentIndex acá. Solo renderiza el actual.
 function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
-  currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
   const lens = lentesFiltrados[currentIndex];
-
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
 
   // =========================
-  // Botón "Ver producto"
+  // Botón "Ver producto" (URL o WhatsApp)
   // =========================
   const productUrl = pickFirstUrl(lens);
   const clientWhatsApp = getClientWhatsApp();
 
-  const fallbackWhatsAppUrl = buildWhatsAppUrl(clientWhatsApp, lens);
-  const finalUrl = productUrl || fallbackWhatsAppUrl;
+  const waUrl = buildWhatsAppUrl(clientWhatsApp, lens);
+  const finalUrl = productUrl || waUrl;
 
   if (finalUrl) {
+    // quitar hidden + forzar display por si quedó pisado
     productBtn.classList.remove("hidden");
+    productBtn.style.display = "inline-flex";
+    productBtn.style.alignItems = "center";
+    productBtn.style.gap = "6px";
 
-    // Texto del botón según destino
     productBtn.textContent = productUrl ? "🛒 Ver producto" : "💬 Consultar por WhatsApp";
-
     productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
   } else {
     productBtn.classList.add("hidden");
+    productBtn.style.display = "none";
     productBtn.onclick = null;
   }
 
