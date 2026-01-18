@@ -100,7 +100,9 @@ let lensImgReady = false;
    4) CARGA CONFIG (cliente + lentes por plan)
 ========================= */
 async function loadClientConfig() {
+  // =========================
   // Cliente
+  // =========================
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
     .select("*")
@@ -108,21 +110,32 @@ async function loadClientConfig() {
     .limit(1);
 
   if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
-  if (!cData || cData.length === 0) throw new Error("No existe el cliente para slug: " + slug);
+  if (!cData || cData.length === 0) {
+    throw new Error("No existe el cliente para slug: " + slug);
+  }
 
   cliente = cData[0];
   const plan = (cliente.plan || "ALL").toUpperCase().trim();
 
-  // Lentes por plan (ALL => A+B, A => A, B => B)
+  // =========================
+  // Lentes por plan
+  // ALL => A + B
+  // A   => solo A
+  // B   => B + algunos A (definidos por grupo)
+  // =========================
   let q = db
     .from("lentes")
     .select("*")
     .eq("cliente_id", cliente.id)
     .eq("activo", true);
 
-  if (plan === "A") q = q.eq("grupo", "A");
-  else if (plan === "B") q = q.eq("grupo", "B");
-  else q = q.in("grupo", ["A", "B"]);
+  if (plan === "A") {
+    q = q.eq("grupo", "A");
+  } else if (plan === "B") {
+    q = q.in("grupo", ["B", "A"]); // B + algunos A
+  } else {
+    q = q.in("grupo", ["A", "B"]); // ALL
+  }
 
   const { data: gData, error: gErr } = await q;
   if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
@@ -133,7 +146,17 @@ async function loadClientConfig() {
     modelNameEl.textContent = "Sin lentes cargados";
   }
 
-  console.log("SLUG:", slug, "PLAN:", plan, "LENTES:", lentes.length);
+  // =========================
+  // 👉 EXPONER CLIENTE GLOBAL
+  // =========================
+  window.__client = cliente || {};
+
+  console.log(
+    "SLUG:", slug,
+    "PLAN:", plan,
+    "LENTES:", lentes.length
+  );
+  console.log("CLIENTE GLOBAL ✅", window.__client);
 }
 
 /* =========================
@@ -229,13 +252,15 @@ function buildWhatsAppUrl(phone, lens) {
   return `https://wa.me/${p54}?text=${encodeURIComponent(msg)}`;
 }
 
-function pickFirstUrl(lens) {
-  const lobj = (lens && typeof lens.links === "object" && lens.links) ? lens.links : null;
-
+function pickLensUrl(lens) {
   const candidates = [
-    lobj?.web, lobj?.tienda, lobj?.ml, lobj?.mercadolibre,
-    lens?.web_url, lens?.tienda_url, lens?.ml_url, lens?.mercadolibre_url,
-    lens?.product_url, lens?.productUrl, lens?.url,
+    lens?.product_url,
+    lens?.productUrl,
+    lens?.ml_url,
+    lens?.mercadolibre_url,
+    lens?.web_url,
+    lens?.tienda_url,
+    lens?.url,
   ];
 
   for (const u of candidates) {
@@ -244,9 +269,36 @@ function pickFirstUrl(lens) {
   return "";
 }
 
-function getClientWhatsApp() {
+// ✅ LINKS DEL CLIENTE (vienen de loadClientConfig, guardados en window.__links)
+function pickClientUrl() {
+  const l = window.__links || {};
+  const candidates = [
+    l.web_url,
+    l.webUrl,
+    l.tienda_url,
+    l.tiendaUrl,
+    l.mercadolibre_url,
+    l.mercado_libre_url,
+    l.ml_url,
+    l.mlUrl,
+  ];
+  for (const u of candidates) {
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return "";
+}
+
+// ✅ WHATSAPP DEL CLIENTE (viene de links o de cliente global)
+function pickClientWhatsApp() {
+  const l = window.__links || {};
   const c = window.__client || {};
+
   return (
+    l.whatsapp_numero ||
+    l.whatsappNumero ||
+    l.numero_whatsapp ||
+    l.numeroWhatsapp ||
+
     c.whatsapp ||
     c.whatsapp_number ||
     c.whatsappNumber ||
@@ -255,12 +307,10 @@ function getClientWhatsApp() {
     c.phone ||
     c.telefono ||
     c.celular ||
-    c.mobile ||
     ""
   );
 }
 
-// ✅ MUY IMPORTANTE: no tocar currentIndex acá. Solo renderiza el actual.
 function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
@@ -268,27 +318,35 @@ function loadCurrentLens() {
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
 
   // =========================
-  // Botón "Ver producto" (URL o WhatsApp)
+  // BOTÓN "VER PRODUCTO" (siempre intenta mostrar)
   // =========================
-  const productUrl = pickFirstUrl(lens);
-  const clientWhatsApp = getClientWhatsApp();
+  const urlLens = pickLensUrl(lens);
+  const urlCliente = pickClientUrl();
+  const waPhone = pickClientWhatsApp();
+  const urlWa = buildWhatsAppUrl(waPhone, lens);
 
-  const waUrl = buildWhatsAppUrl(clientWhatsApp, lens);
-  const finalUrl = productUrl || waUrl;
+  const finalUrl = urlLens || urlCliente || urlWa;
+
+  // 👇 Esto te va a mostrar SIEMPRE por qué se esconde o no
+  console.log("BTN DEBUG:", { urlLens, urlCliente, waPhone, finalUrl });
 
   if (finalUrl) {
-    // quitar hidden + forzar display por si quedó pisado
     productBtn.classList.remove("hidden");
     productBtn.style.display = "inline-flex";
-    productBtn.style.alignItems = "center";
-    productBtn.style.gap = "6px";
+    productBtn.style.visibility = "visible";
+    productBtn.style.opacity = "1";
 
-    productBtn.textContent = productUrl ? "🛒 Ver producto" : "💬 Consultar por WhatsApp";
+    productBtn.textContent = "🛒 Ver producto";
     productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
   } else {
-    productBtn.classList.add("hidden");
-    productBtn.style.display = "none";
-    productBtn.onclick = null;
+    // Si no hay nada, avisamos en el texto (para que lo veas y no “desaparezca”)
+    productBtn.classList.remove("hidden");
+    productBtn.style.display = "inline-flex";
+    productBtn.style.visibility = "visible";
+    productBtn.style.opacity = "1";
+
+    productBtn.textContent = "⚠️ Falta URL/WhatsApp";
+    productBtn.onclick = () => alert("Este cliente no tiene link web/ML ni WhatsApp configurado.");
   }
 
   // =========================
