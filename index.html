@@ -168,63 +168,108 @@ categoryFilter.onchange = aplicarFiltro;
 /* =========================
    6) LENTES (carga imagen + botón producto)
 ========================= */
+
+// Helpers
+function normalizePhone(phone) {
+  // deja solo números (para wa.me)
+  return String(phone || "").replace(/[^\d]/g, "");
+}
+
+function buildWhatsAppUrl(phone, lens) {
+  const p = normalizePhone(phone);
+  if (!p) return "";
+
+  const model = (lens && (lens.nombre_modelo || lens.nombre || lens.model || "")).trim();
+  const msg = model
+    ? `Hola! Quiero consultar por el modelo: ${model}`
+    : `Hola! Quiero consultar por un modelo de lentes.`;
+
+  return `https://wa.me/${p}?text=${encodeURIComponent(msg)}`;
+}
+
+function pickFirstUrl(lens) {
+  // 1) si el lente trae objeto "links", lo usamos
+  const lobj = (lens && typeof lens.links === "object" && lens.links) ? lens.links : null;
+
+  const candidates = [
+    lobj?.web,
+    lobj?.tienda,
+    lobj?.ml,
+    lobj?.mercadolibre,
+    lens?.web_url,
+    lens?.tienda_url,
+    lens?.ml_url,
+    lens?.mercadolibre_url,
+    lens?.product_url,
+    lens?.productUrl,
+    lens?.url,
+  ];
+
+  for (const u of candidates) {
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return "";
+}
+
 function loadCurrentLens() {
-  if (!lentesFiltrados.length) return;
+  if (!lentesFiltrados || !lentesFiltrados.length) return;
 
   currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
   const lens = lentesFiltrados[currentIndex];
 
-  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
+  modelNameEl.textContent = lens.nombre_modelo || lens.nombre || "Modelo";
 
-  // ✅ Botón VER PRODUCTO:
-  // 1) Si existe url_del_producto => abre esa URL (web o Mercado Libre)
-  // 2) Si NO existe => abre WhatsApp del cliente
-  const urlProducto = (lens.url_del_producto || "").trim();
+  // =========================
+  // Botón "Ver producto"
+  // =========================
+  const productUrl = pickFirstUrl(lens);
 
-  if (urlProducto) {
+  // whatsapp del cliente (desde config) - probamos varios nombres por si cambian
+  const clientWhatsApp =
+    (window.clientConfig && (clientConfig.whatsapp || clientConfig.whatsapp_number || clientConfig.whatsappNumber || clientConfig.phone)) ||
+    window.clientWhatsapp ||
+    window.clientWhatsApp ||
+    "";
+
+  const fallbackWhatsAppUrl = buildWhatsAppUrl(clientWhatsApp, lens);
+  const finalUrl = productUrl || fallbackWhatsAppUrl;
+
+  if (finalUrl) {
     productBtn.classList.remove("hidden");
     productBtn.textContent = "🛒 Ver producto";
-    productBtn.onclick = () => window.open(urlProducto, "_blank");
+    productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
   } else {
-    // fallback WhatsApp del cliente
-    const num = String(links?.whatsapp_numero || "").replace(/\D/g, "");
-    if (num) {
-      const msgBase = links?.whatsapp_mensaje || "Hola! Me interesa este modelo:";
-      const msg = `${msgBase}\nModelo: ${lens.nombre_modelo || ""}`;
-      const wa = `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
-
-      productBtn.classList.remove("hidden");
-      productBtn.textContent = "🟢 Consultar por WhatsApp";
-      productBtn.onclick = () => window.open(wa, "_blank");
-    } else {
-      productBtn.classList.add("hidden");
-      productBtn.onclick = null;
-    }
+    productBtn.classList.add("hidden");
+    productBtn.onclick = null;
   }
 
-  // Imagen
+  // =========================
+  // Imagen del lente
+  // =========================
   lensImgReady = false;
-  if (!lens.imagen_url) return;
+  const imgUrl = lens.imagen_url || lens.image_url || lens.imagen || lens.image || "";
+  if (!imgUrl) return;
 
   lensImg = new Image();
   lensImg.crossOrigin = "anonymous";
-  lensImg.src = lens.imagen_url;
+  lensImg.src = imgUrl;
 
   lensImg.onload = () => { lensImgReady = true; };
   lensImg.onerror = () => {
     lensImgReady = false;
-    console.warn("No cargó imagen:", lens.imagen_url);
+    console.warn("No cargó imagen:", imgUrl);
   };
 }
 
 /* Navegación */
 prevBtn.onclick = () => {
-  if (!lentesFiltrados.length) return;
+  if (!lentesFiltrados || !lentesFiltrados.length) return;
   currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
   loadCurrentLens();
 };
+
 nextBtn.onclick = () => {
-  if (!lentesFiltrados.length) return;
+  if (!lentesFiltrados || !lentesFiltrados.length) return;
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens();
 };
