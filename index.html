@@ -222,126 +222,73 @@ function aplicarFiltro() {
 categoryFilter.onchange = aplicarFiltro;
 
 /* =========================
-   6) LENTES (carga imagen + botón producto)
+   6) LENTES (imagen + botón producto)
 ========================= */
 
-// Helpers
-function normalizePhone(phone) {
-  // deja solo números (para wa.me), permite que venga con +, espacios, etc.
-  return String(phone || "").replace(/[^\d]/g, "");
+function getClientWhatsApp() {
+  const c = window.__client || {};
+  return c.whatsapp || "";
 }
 
 function buildWhatsAppUrl(phone, lens) {
-  const p = normalizePhone(phone);
-  if (!p) return "";
+  if (!phone) return "";
 
-  const model = (lens && (lens.nombre_modelo || lens.nombre || lens.model || "") || "").trim();
+  const clean = String(phone).replace(/[^\d]/g, "");
+  const model = (lens?.nombre_modelo || "").trim();
   const msg = model
     ? `Hola! Quiero consultar por el modelo: ${model}`
-    : `Hola! Quiero consultar por un modelo de lentes.`;
+    : `Hola! Quiero consultar por un modelo de lentes`;
 
-  // IMPORTANTE: no forzamos 54. Usamos el número como lo guardes (549..., 1..., 34..., etc.)
-  return `https://wa.me/${p}?text=${encodeURIComponent(msg)}`;
+  return `https://wa.me/${clean}?text=${encodeURIComponent(msg)}`;
 }
 
 function pickFirstUrl(lens) {
-  const lobj = (lens && typeof lens.links === "object" && lens.links) ? lens.links : null;
-
-  const candidates = [
-    lobj?.web,
-    lobj?.tienda,
-    lobj?.ml,
-    lobj?.mercadolibre,
-
-    lens?.web_url,
-    lens?.tienda_url,
-    lens?.ml_url,
-    lens?.mercadolibre_url,
-
-    lens?.product_url,
-    lens?.productUrl,
-    lens?.url,
-  ];
-
-  for (const u of candidates) {
-    if (typeof u === "string" && u.trim()) return u.trim();
-  }
-  return "";
-}
-
-/**
- * Lee WhatsApp desde window.__client (que seteás en loadClientConfig)
- * Soporta columna "WhatsApp" (mayúsculas) y variaciones.
- */
-function getClientWhatsApp() {
-  const c = window.__client || {};
   return (
-    c.WhatsApp ||            // <-- TU COLUMNA ACTUAL (mayúsculas)
-    c.whatsapp ||
-    c.whatsapp_number ||
-    c.whatsappNumber ||
-    c.phone ||
-    c.telefono ||
-    c.celular ||
-    c.mobile ||
-    c.numero_whatsapp ||
-    c.numeroWhatsapp ||
-    window.clientWhatsapp ||
-    window.clientWhatsApp ||
+    lens?.product_url ||
+    lens?.productUrl ||
+    lens?.url ||
     ""
   );
 }
 
 function loadCurrentLens() {
-  if (!lentesFiltrados || !lentesFiltrados.length) return;
+  if (!lentesFiltrados.length) return;
 
-  currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
   const lens = lentesFiltrados[currentIndex];
+  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
 
-  modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
-
-  // =========================
-  // Botón "Ver producto"
-  // =========================
-  const urlLens = pickFirstUrl(lens);
-
-  // (opcional) url a nivel cliente si quisieras un default general
-  const urlCliente =
-    (window.__client && (window.__client.web_url || window.__client.tienda_url || window.__client.ml_url || window.__client.mercadolibre_url)) ||
-    "";
-
+  // ---------- BOTÓN ----------
+  const productUrl = pickFirstUrl(lens);
   const waPhone = getClientWhatsApp();
   const waUrl = buildWhatsAppUrl(waPhone, lens);
+  const finalUrl = productUrl || waUrl;
 
-  const finalUrl = urlLens || urlCliente || waUrl;
-
-  console.log("BTN DEBUG:", { urlLens, urlCliente, waPhone, finalUrl });
+  console.log("BTN DEBUG:", {
+    productUrl,
+    waPhone,
+    finalUrl
+  });
 
   if (finalUrl) {
     productBtn.classList.remove("hidden");
-    productBtn.textContent = (urlLens || urlCliente) ? "🛒 Ver producto" : "💬 Consultar por WhatsApp";
-    productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
+    productBtn.textContent = productUrl
+      ? "🛒 Ver producto"
+      : "💬 Consultar por WhatsApp";
+
+    productBtn.onclick = () => window.open(finalUrl, "_blank");
   } else {
     productBtn.classList.add("hidden");
     productBtn.onclick = null;
   }
 
-  // =========================
-  // Imagen del lente
-  // =========================
+  // ---------- IMAGEN ----------
   lensImgReady = false;
-  const imgUrl = lens?.imagen_url || lens?.image_url || lens?.imagen || lens?.image || "";
-  if (!imgUrl) return;
+  if (!lens.imagen_url) return;
 
   lensImg = new Image();
   lensImg.crossOrigin = "anonymous";
-  lensImg.src = imgUrl;
-
-  lensImg.onload = () => { lensImgReady = true; };
-  lensImg.onerror = () => {
-    lensImgReady = false;
-    console.warn("No cargó imagen:", imgUrl);
-  };
+  lensImg.src = lens.imagen_url;
+  lensImg.onload = () => (lensImgReady = true);
 }
 
 /* =========================
