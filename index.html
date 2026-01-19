@@ -112,18 +112,23 @@ async function loadClientConfig() {
 
   cliente = cData[0];
 
-  // ✅ Buscar la columna WhatsApp sin importar mayúsculas/minúsculas
-  const waKey = Object.keys(cliente || {}).find(k => String(k).toLowerCase() === "whatsapp");
-  const waRaw = waKey ? String(cliente[waKey] ?? "").trim() : "";
-
-  // Normalizamos SIEMPRE a cliente.whatsapp (minúscula)
-  cliente.whatsapp = waRaw;
-
-  // Cliente global
-  window.__client = cliente;
-
+  // Guardamos SIEMPRE cliente global
+  window.__client = cliente || {};
   console.log("CLIENTE GLOBAL ✅", window.__client);
-  console.log("WHATSAPP KEY ✅", waKey, "VALUE:", window.__client.whatsapp);
+
+  // Normalización WhatsApp (por si viene como WhatsApp / whatsapp / etc.)
+  const c = window.__client || {};
+  const wa =
+    c.whatsapp ??
+    c.WhatsApp ??
+    c.WHATSAPP ??
+    c["WhatsApp"] ??
+    c["whatsapp"] ??
+    "";
+
+  // Dejamos un alias fijo para el resto del código
+  window.__client.whatsapp_norm = String(wa || "").trim();
+  console.log("WHATSAPP NORM ✅", window.__client.whatsapp_norm);
 
   const plan = (cliente.plan || "ALL").toUpperCase().trim();
 
@@ -222,73 +227,93 @@ function aplicarFiltro() {
 categoryFilter.onchange = aplicarFiltro;
 
 /* =========================
-   6) LENTES (imagen + botón producto)
+   6) LENTES (carga imagen + botón producto)
 ========================= */
 
-function getClientWhatsApp() {
-  const c = window.__client || {};
-  return c.whatsapp || "";
+// Helpers
+function normalizePhone(phone) {
+  return String(phone || "").replace(/[^\d]/g, "");
 }
 
 function buildWhatsAppUrl(phone, lens) {
-  if (!phone) return "";
+  const p = normalizePhone(phone);
+  if (!p) return "";
 
-  const clean = String(phone).replace(/[^\d]/g, "");
-  const model = (lens?.nombre_modelo || "").trim();
+  const model = String(lens?.nombre_modelo || lens?.nombre || "").trim();
   const msg = model
     ? `Hola! Quiero consultar por el modelo: ${model}`
-    : `Hola! Quiero consultar por un modelo de lentes`;
+    : `Hola! Quiero consultar por un modelo de lentes.`;
 
-  return `https://wa.me/${clean}?text=${encodeURIComponent(msg)}`;
+  return `https://wa.me/${p}?text=${encodeURIComponent(msg)}`;
 }
 
 function pickFirstUrl(lens) {
-  return (
-    lens?.product_url ||
-    lens?.productUrl ||
-    lens?.url ||
-    ""
-  );
+  const candidates = [
+    lens?.product_url,
+    lens?.productUrl,
+    lens?.ml_url,
+    lens?.mercadolibre_url,
+    lens?.web_url,
+    lens?.tienda_url,
+    lens?.url,
+  ];
+  for (const u of candidates) {
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return "";
+}
+
+function getClientWhatsApp() {
+  const c = window.__client || {};
+  // usamos el normalizado que seteamos en el bloque 4
+  const wa = c.whatsapp_norm || c.whatsapp || c.WhatsApp || "";
+  return String(wa || "").trim();
 }
 
 function loadCurrentLens() {
-  if (!lentesFiltrados.length) return;
+  if (!lentesFiltrados || !lentesFiltrados.length) return;
 
+  currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
   const lens = lentesFiltrados[currentIndex];
-  modelNameEl.textContent = lens.nombre_modelo || "Modelo";
 
-  // ---------- BOTÓN ----------
-  const productUrl = pickFirstUrl(lens);
+  modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
+
+  // =========================
+  // Botón "Ver producto"
+  // =========================
+  const urlLens = pickFirstUrl(lens);
   const waPhone = getClientWhatsApp();
   const waUrl = buildWhatsAppUrl(waPhone, lens);
-  const finalUrl = productUrl || waUrl;
+  const finalUrl = urlLens || waUrl;
 
-  console.log("BTN DEBUG:", {
-    productUrl,
-    waPhone,
-    finalUrl
-  });
+  console.log("BTN DEBUG:", { urlLens, waPhone, finalUrl });
 
   if (finalUrl) {
     productBtn.classList.remove("hidden");
-    productBtn.textContent = productUrl
-      ? "🛒 Ver producto"
-      : "💬 Consultar por WhatsApp";
+    productBtn.style.display = "inline-flex";     // fuerza visible en el layout
+    productBtn.style.alignItems = "center";
+    productBtn.style.justifyContent = "center";
 
-    productBtn.onclick = () => window.open(finalUrl, "_blank");
+    productBtn.textContent = urlLens ? "🛒 Ver producto" : "💬 Consultar por WhatsApp";
+    productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
   } else {
     productBtn.classList.add("hidden");
     productBtn.onclick = null;
   }
 
-  // ---------- IMAGEN ----------
+  // =========================
+  // Imagen
+  // =========================
   lensImgReady = false;
-  if (!lens.imagen_url) return;
+  const imgUrl = lens?.imagen_url || "";
+  if (!imgUrl) return;
 
   lensImg = new Image();
   lensImg.crossOrigin = "anonymous";
-  lensImg.src = lens.imagen_url;
-  lensImg.onload = () => (lensImgReady = true);
+  lensImg.src = imgUrl;
+
+  lensImg.onload = () => { lensImgReady = true; };
+  lensImg.onerror = () => { lensImgReady = false; console.warn("No cargó imagen:", imgUrl); };
 }
 
 /* =========================
