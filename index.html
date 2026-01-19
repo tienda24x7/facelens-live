@@ -100,9 +100,7 @@ let lensImgReady = false;
    4) CARGA CONFIG (cliente + lentes por plan)
 ========================= */
 async function loadClientConfig() {
-  // =========================
   // Cliente
-  // =========================
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
     .select("*")
@@ -110,32 +108,35 @@ async function loadClientConfig() {
     .limit(1);
 
   if (cErr) throw new Error("Error leyendo clientes: " + cErr.message);
-  if (!cData || cData.length === 0) {
-    throw new Error("No existe el cliente para slug: " + slug);
-  }
+  if (!cData || cData.length === 0) throw new Error("No existe el cliente para slug: " + slug);
 
   cliente = cData[0];
+
+  // ✅ Buscar la columna WhatsApp sin importar mayúsculas/minúsculas
+  const waKey = Object.keys(cliente || {}).find(k => String(k).toLowerCase() === "whatsapp");
+  const waRaw = waKey ? String(cliente[waKey] ?? "").trim() : "";
+
+  // Normalizamos SIEMPRE a cliente.whatsapp (minúscula)
+  cliente.whatsapp = waRaw;
+
+  // Cliente global
+  window.__client = cliente;
+
+  console.log("CLIENTE GLOBAL ✅", window.__client);
+  console.log("WHATSAPP KEY ✅", waKey, "VALUE:", window.__client.whatsapp);
+
   const plan = (cliente.plan || "ALL").toUpperCase().trim();
 
-  // =========================
-  // Lentes por plan
-  // ALL => A + B
-  // A   => solo A
-  // B   => B + algunos A (definidos por grupo)
-  // =========================
+  // Lentes por plan (ALL => A+B, A => A, B => B)
   let q = db
     .from("lentes")
     .select("*")
     .eq("cliente_id", cliente.id)
     .eq("activo", true);
 
-  if (plan === "A") {
-    q = q.eq("grupo", "A");
-  } else if (plan === "B") {
-    q = q.in("grupo", ["B", "A"]); // B + algunos A
-  } else {
-    q = q.in("grupo", ["A", "B"]); // ALL
-  }
+  if (plan === "A") q = q.eq("grupo", "A");
+  else if (plan === "B") q = q.eq("grupo", "B");
+  else q = q.in("grupo", ["A", "B"]);
 
   const { data: gData, error: gErr } = await q;
   if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
@@ -146,17 +147,7 @@ async function loadClientConfig() {
     modelNameEl.textContent = "Sin lentes cargados";
   }
 
-  // =========================
-  // 👉 EXPONER CLIENTE GLOBAL
-  // =========================
-  window.__client = cliente || {};
-
-  console.log(
-    "SLUG:", slug,
-    "PLAN:", plan,
-    "LENTES:", lentes.length
-  );
-  console.log("CLIENTE GLOBAL ✅", window.__client);
+  console.log("SLUG:", slug, "PLAN:", plan, "LENTES:", lentes.length);
 }
 
 /* =========================
