@@ -212,6 +212,7 @@ function aplicarFiltro() {
     return;
   }
 
+  // IMPORTANTE: mostrar el primer lente del filtro sin "saltar"
   loadCurrentLens();
 }
 
@@ -264,8 +265,9 @@ function getClientWhatsApp() {
 function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
-  currentIndex = (currentIndex + lentesFiltrados.length) % lentesFiltrados.length;
-  const lens = lentesFiltrados[currentIndex];
+  // ✅ FIX CLAVE: NO tocar currentIndex acá
+  const safeIndex = ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
+  const lens = lentesFiltrados[safeIndex];
 
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
 
@@ -277,7 +279,7 @@ function loadCurrentLens() {
   const waUrl = buildWhatsAppUrl(waPhone, lens);
   const finalUrl = urlLens || waUrl;
 
-  console.log("BTN DEBUG:", { urlLens, waPhone, finalUrl });
+  console.log("BTN DEBUG:", { urlLens, waPhone, finalUrl, idx: safeIndex, total: lentesFiltrados.length });
 
   if (finalUrl) {
     productBtn.classList.remove("hidden");
@@ -306,6 +308,19 @@ function loadCurrentLens() {
   lensImg.onload = () => { lensImgReady = true; };
   lensImg.onerror = () => { lensImgReady = false; console.warn("No cargó imagen:", imgUrl); };
 }
+
+/* Navegación */
+prevBtn.onclick = () => {
+  if (!lentesFiltrados || !lentesFiltrados.length) return;
+  currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
+  loadCurrentLens();
+};
+
+nextBtn.onclick = () => {
+  if (!lentesFiltrados || !lentesFiltrados.length) return;
+  currentIndex = (currentIndex + 1) % lentesFiltrados.length;
+  loadCurrentLens();
+};
 
 /* =========================
    7) AR (FaceMesh + suavizado + tamaño estable)
