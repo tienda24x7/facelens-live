@@ -112,36 +112,27 @@ async function loadClientConfig() {
 
   cliente = cData[0];
 
-  // Guardamos SIEMPRE cliente global
+  // guardar cliente global para que lo use el botón/whatsapp
   window.__client = cliente || {};
   console.log("CLIENTE GLOBAL ✅", window.__client);
 
-  // Normalización WhatsApp (por si viene como WhatsApp / whatsapp / etc.)
-  const c = window.__client || {};
-  const wa =
-    c.whatsapp ??
-    c.WhatsApp ??
-    c.WHATSAPP ??
-    c["WhatsApp"] ??
-    c["whatsapp"] ??
-    "";
-
-  // Dejamos un alias fijo para el resto del código
-  window.__client.whatsapp_norm = String(wa || "").trim();
-  console.log("WHATSAPP NORM ✅", window.__client.whatsapp_norm);
-
   const plan = (cliente.plan || "ALL").toUpperCase().trim();
 
-  // Lentes por plan (ALL => A+B, A => A, B => B)
+  // Lentes por plan
   let q = db
     .from("lentes")
     .select("*")
     .eq("cliente_id", cliente.id)
     .eq("activo", true);
 
-  if (plan === "A") q = q.eq("grupo", "A");
-  else if (plan === "B") q = q.eq("grupo", "B");
-  else q = q.in("grupo", ["A", "B"]);
+  if (plan === "A") {
+    q = q.eq("grupo", "A");
+  } else if (plan === "B") {
+    q = q.eq("grupo", "B");
+  } else {
+    // ALL: A+B + los que no tienen grupo cargado (NULL o vacío)
+    q = q.or("grupo.in.(A,B),grupo.is.null,grupo.eq.");
+  }
 
   const { data: gData, error: gErr } = await q;
   if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
