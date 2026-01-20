@@ -139,7 +139,9 @@ function pickFirstClientUrl(cliente) {
 }
 
 async function loadClientConfig() {
-  // Cliente
+  // =========================
+  // 1) Cliente por slug
+  // =========================
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
     .select("*")
@@ -151,23 +153,40 @@ async function loadClientConfig() {
 
   cliente = cData[0];
 
-  // guardar cliente global para que lo use el botón/whatsapp
+  // Guardar cliente global para que lo use el botón/whatsapp
   window.__client = cliente || {};
-  // enriquecer cliente global (sin romper nada)
   window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
   window.__client.default_url = pickFirstClientUrl(window.__client);
 
   console.log("CLIENTE GLOBAL ✅", window.__client);
 
+  // Plan legacy (por si no hay catálogos cargados)
   const plan = String(cliente.plan || "ALL").toUpperCase().trim();
 
   // =========================
-  // LENTES por plan / catálogo
+  // 2) Catálogos permitidos (Cliente → Catálogo)
+  // =========================
+  // Tabla: lentes_catalogos (cliente_id, catalogo)
+  const { data: catData, error: catErr } = await db
+    .from("lentes_catalogos")
+    .select("catalogo")
+    .eq("cliente_id", cliente.id);
+
+  if (catErr) throw new Error("Error leyendo lentes_catalogos: " + catErr.message);
+
+  const catalogos = (catData || [])
+    .map(r => String(r.catalogo || "").toUpperCase().trim())
+    .filter(Boolean);
+
+  const hasCatalogs = catalogos.length > 0;
+  const hasALL = catalogos.includes("ALL");
+
+  // =========================
+  // 3) Traer lentes
   // =========================
   let gData = [];
-  let mode = "ALL";
+  let mode = "LEGACY";
 
-  // Base query (siempre)
   const baseQ = () =>
     db
       .from("lentes")
@@ -175,45 +194,32 @@ async function loadClientConfig() {
       .eq("cliente_id", cliente.id)
       .eq("activo", true);
 
-  if (plan === "A" || plan === "B") {
-    // Modo legacy por grupo
-    mode = `GRUPO_${plan}`;
-    const { data, error } = await baseQ().eq("grupo", plan);
-    if (error) throw new Error("Error leyendo lentes: " + error.message);
-    gData = data || [];
-
-  } else if (plan === "ALL") {
-    // ALL: trae todo (sin depender de grupo)
-    // (si querés excluir los inactivos ya está con .eq("activo", true))
-    mode = "ALL";
-    const { data, error } = await baseQ();
-    if (error) throw new Error("Error leyendo lentes: " + error.message);
-    gData = data || [];
-
-  } else {
-    // Modo catálogo (plan = nombre de catálogo: NICOLAS, EZEQUIEL, etc)
-    mode = `CATALOGO_${plan}`;
-
-    // 1) Busco IDs de lentes asignados al catálogo
-    const { data: mapData, error: mapErr } = await db
-      .from("lentes_catalogos")
-      .select("*")
-      .eq("catalogo", plan);
-
-    if (mapErr) throw new Error("Error leyendo lentes_catalogos: " + mapErr.message);
-
-    // Soportar distintos nombres de columna por seguridad
-    const lensIds = (mapData || [])
-      .map(r => r.lente_id || r.lens_id || r.lente || r.lens || r.id_lente || r.lenteid || r.lensid || r.id)
-      .filter(Boolean);
-
-    // 2) Si hay IDs, traigo esos lentes
-    if (lensIds.length) {
-      const { data, error } = await baseQ().in("id", lensIds);
-      if (error) throw new Error("Error leyendo lentes por catálogo: " + error.message);
+  if (hasCatalogs) {
+    // ✅ MODO ESCALABLE POR CATALOGO(S)
+    if (hasALL) {
+      mode = "CATALOGOS_ALL";
+      const { data, error } = await baseQ();
+      if (error) throw new Error("Error leyendo lentes: " + error.message);
       gData = data || [];
     } else {
-      gData = [];
+      mode = `CATALOGOS_${catalogos.join("_")}`;
+      // IMPORTANTE: el campo "grupo" en lentes debe tener EXACTAMENTE esos valores (ej: NICOLAS / EZEQUIEL)
+      const { data, error } = await baseQ().in("grupo", catalogos);
+      if (error) throw new Error("Error leyendo lentes por catálogos: " + error.message);
+      gData = data || [];
+    }
+  } else {
+    // ✅ FALLBACK LEGACY (si el cliente todavía no tiene filas en lentes_catalogos)
+    if (plan === "A" || plan === "B") {
+      mode = `LEGACY_GRUPO_${plan}`;
+      const { data, error } = await baseQ().eq("grupo", plan);
+      if (error) throw new Error("Error leyendo lentes: " + error.message);
+      gData = data || [];
+    } else {
+      mode = "LEGACY_ALL";
+      const { data, error } = await baseQ();
+      if (error) throw new Error("Error leyendo lentes: " + error.message);
+      gData = data || [];
     }
   }
 
@@ -224,10 +230,10 @@ async function loadClientConfig() {
     modelNameEl.textContent = "Sin lentes cargados";
   }
 
-  console.log("SLUG:", slug, "PLAN:", plan, "MODO:", mode, "LENTES:", lentes.length);
+  console.log("SLUG:", slug, "PLAN:", plan, "CATALOGOS:", catalogos, "MODO:", mode, "LENTES:", lentes.length);
 
   // Devolver algo útil (no rompe nada, y ayuda al wrapper)
-  return { cliente, plan, lentes, mode };
+  return { cliente, plan, catalogos, lentes, mode };
 }
 
 /* =========================
