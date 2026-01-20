@@ -230,6 +230,11 @@ async function loadClientConfig() {
     modelNameEl.textContent = "Sin lentes cargados";
   }
 
+  // ✅ DEBUG GLOBAL (2-3 líneas, NO rompe nada)
+  window.__lastLoadMode = mode;
+  window.__lastCatalogos = catalogos;
+  window.__lastLentes = lentes;
+
   console.log("SLUG:", slug, "PLAN:", plan, "CATALOGOS:", catalogos, "MODO:", mode, "LENTES:", lentes.length);
 
   // Devolver algo útil (no rompe nada, y ayuda al wrapper)
