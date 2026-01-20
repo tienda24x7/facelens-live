@@ -159,37 +159,75 @@ async function loadClientConfig() {
 
   console.log("CLIENTE GLOBAL ✅", window.__client);
 
-  const plan = (cliente.plan || "ALL").toUpperCase().trim();
+  const plan = String(cliente.plan || "ALL").toUpperCase().trim();
 
-  // Lentes por plan
-  let q = db
-    .from("lentes")
-    .select("*")
-    .eq("cliente_id", cliente.id)
-    .eq("activo", true);
+  // =========================
+  // LENTES por plan / catálogo
+  // =========================
+  let gData = [];
+  let mode = "ALL";
 
-  if (plan === "A") {
-    q = q.eq("grupo", "A");
-  } else if (plan === "B") {
-    q = q.eq("grupo", "B");
+  // Base query (siempre)
+  const baseQ = () =>
+    db
+      .from("lentes")
+      .select("*")
+      .eq("cliente_id", cliente.id)
+      .eq("activo", true);
+
+  if (plan === "A" || plan === "B") {
+    // Modo legacy por grupo
+    mode = `GRUPO_${plan}`;
+    const { data, error } = await baseQ().eq("grupo", plan);
+    if (error) throw new Error("Error leyendo lentes: " + error.message);
+    gData = data || [];
+
+  } else if (plan === "ALL") {
+    // ALL: trae todo (sin depender de grupo)
+    // (si querés excluir los inactivos ya está con .eq("activo", true))
+    mode = "ALL";
+    const { data, error } = await baseQ();
+    if (error) throw new Error("Error leyendo lentes: " + error.message);
+    gData = data || [];
+
   } else {
-    // ALL: A+B + los que no tienen grupo cargado (NULL o vacío)
-    q = q.or("grupo.in.(A,B),grupo.is.null,grupo.eq.");
+    // Modo catálogo (plan = nombre de catálogo: NICOLAS, EZEQUIEL, etc)
+    mode = `CATALOGO_${plan}`;
+
+    // 1) Busco IDs de lentes asignados al catálogo
+    const { data: mapData, error: mapErr } = await db
+      .from("lentes_catalogos")
+      .select("*")
+      .eq("catalogo", plan);
+
+    if (mapErr) throw new Error("Error leyendo lentes_catalogos: " + mapErr.message);
+
+    // Soportar distintos nombres de columna por seguridad
+    const lensIds = (mapData || [])
+      .map(r => r.lente_id || r.lens_id || r.lente || r.lens || r.id_lente || r.lenteid || r.lensid || r.id)
+      .filter(Boolean);
+
+    // 2) Si hay IDs, traigo esos lentes
+    if (lensIds.length) {
+      const { data, error } = await baseQ().in("id", lensIds);
+      if (error) throw new Error("Error leyendo lentes por catálogo: " + error.message);
+      gData = data || [];
+    } else {
+      gData = [];
+    }
   }
 
-  const { data: gData, error: gErr } = await q;
-  if (gErr) throw new Error("Error leyendo lentes: " + gErr.message);
-
+  // Asignar
   lentes = gData || [];
 
   if (!lentes.length) {
     modelNameEl.textContent = "Sin lentes cargados";
   }
 
-  console.log("SLUG:", slug, "PLAN:", plan, "LENTES:", lentes.length);
+  console.log("SLUG:", slug, "PLAN:", plan, "MODO:", mode, "LENTES:", lentes.length);
 
   // Devolver algo útil (no rompe nada, y ayuda al wrapper)
-  return { cliente, plan, lentes };
+  return { cliente, plan, lentes, mode };
 }
 
 /* =========================
