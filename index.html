@@ -287,7 +287,8 @@ function loadCurrentLens() {
     productBtn.style.alignItems = "center";
     productBtn.style.justifyContent = "center";
 
-    productBtn.textContent = urlLens ? "🛒 Ver producto" : "💬 Consultar por WhatsApp";
+    // ✅ Siempre el mismo texto, aunque sea WhatsApp el fallback
+    productBtn.textContent = "🛒 Ver producto";
     productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
   } else {
     productBtn.classList.add("hidden");
