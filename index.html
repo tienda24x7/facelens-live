@@ -99,6 +99,45 @@ let lensImgReady = false;
 /* =========================
    4) CARGA CONFIG (cliente + lentes por plan)
 ========================= */
+
+// Helpers para cliente (se usan en bloque 4/6)
+function normalizePhone(phone) {
+  return String(phone || "").replace(/[^\d]/g, "");
+}
+
+// Regla simple:
+// - Si el cliente pone país (ej: 549..., 54..., 598..., 1..., etc) => lo respeta
+// - Si pone un número "local" (corto) => asumimos Argentina y le anteponemos 549
+function normalizeWhatsApp(phone) {
+  const p = normalizePhone(phone);
+  if (!p) return "";
+
+  // Si ya viene con prefijo internacional (>=12 dígitos) o empieza con 54, lo dejamos
+  if (p.startsWith("54") || p.length >= 12) return p;
+
+  // Si NO trae prefijo y es relativamente "local", asumimos Argentina
+  // (para otros países, que lo carguen con código país)
+  return `549${p}`;
+}
+
+function pickFirstClientUrl(cliente) {
+  const c = cliente || {};
+  const candidates = [
+    c.product_url,
+    c.productUrl,
+    c.ml_url,
+    c.mercadolibre_url,
+    c.web_url,
+    c.tienda_url,
+    c.url,
+    c.link,
+  ];
+  for (const u of candidates) {
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return "";
+}
+
 async function loadClientConfig() {
   // Cliente
   const { data: cData, error: cErr } = await db
@@ -114,6 +153,10 @@ async function loadClientConfig() {
 
   // guardar cliente global para que lo use el botón/whatsapp
   window.__client = cliente || {};
+  // enriquecer cliente global (sin romper nada)
+  window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
+  window.__client.default_url = pickFirstClientUrl(window.__client);
+
   console.log("CLIENTE GLOBAL ✅", window.__client);
 
   const plan = (cliente.plan || "ALL").toUpperCase().trim();
@@ -144,6 +187,9 @@ async function loadClientConfig() {
   }
 
   console.log("SLUG:", slug, "PLAN:", plan, "LENTES:", lentes.length);
+
+  // Devolver algo útil (no rompe nada, y ayuda al wrapper)
+  return { cliente, plan, lentes };
 }
 
 /* =========================
@@ -222,11 +268,6 @@ categoryFilter.onchange = aplicarFiltro;
    6) LENTES (carga imagen + botón producto)
 ========================= */
 
-// Helpers
-function normalizePhone(phone) {
-  return String(phone || "").replace(/[^\d]/g, "");
-}
-
 function buildWhatsAppUrl(phone, lens) {
   const p = normalizePhone(phone);
   if (!p) return "";
@@ -262,6 +303,14 @@ function getClientWhatsApp() {
   return String(wa || "").trim();
 }
 
+function getClientDefaultUrl() {
+  const c = window.__client || {};
+  return (
+    (typeof c.default_url === "string" && c.default_url.trim()) ? c.default_url.trim()
+    : pickFirstClientUrl(c)
+  );
+}
+
 function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
@@ -272,14 +321,23 @@ function loadCurrentLens() {
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
 
   // =========================
-  // Botón "Ver producto"
+  // Botón "Ver producto" (Prioridad: Lente > Cliente > WhatsApp)
   // =========================
   const urlLens = pickFirstUrl(lens);
+  const urlCliente = getClientDefaultUrl();
   const waPhone = getClientWhatsApp();
   const waUrl = buildWhatsAppUrl(waPhone, lens);
-  const finalUrl = urlLens || waUrl;
 
-  console.log("BTN DEBUG:", { urlLens, waPhone, finalUrl, idx: safeIndex, total: lentesFiltrados.length });
+  const finalUrl = urlLens || urlCliente || waUrl;
+
+  console.log("BTN DEBUG:", {
+    urlLens,
+    urlCliente,
+    waPhone,
+    finalUrl,
+    idx: safeIndex,
+    total: lentesFiltrados.length
+  });
 
   if (finalUrl) {
     productBtn.classList.remove("hidden");
@@ -287,7 +345,7 @@ function loadCurrentLens() {
     productBtn.style.alignItems = "center";
     productBtn.style.justifyContent = "center";
 
-    // ✅ Siempre el mismo texto, aunque sea WhatsApp el fallback
+    // ✅ Siempre el mismo texto
     productBtn.textContent = "🛒 Ver producto";
     productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
   } else {
