@@ -111,12 +111,7 @@ function normalizePhone(phone) {
 function normalizeWhatsApp(phone) {
   const p = normalizePhone(phone);
   if (!p) return "";
-
-  // Si ya viene con prefijo internacional (>=12 dígitos) o empieza con 54, lo dejamos
   if (p.startsWith("54") || p.length >= 12) return p;
-
-  // Si NO trae prefijo y es relativamente "local", asumimos Argentina
-  // (para otros países, que lo carguen con código país)
   return `549${p}`;
 }
 
@@ -136,6 +131,18 @@ function pickFirstClientUrl(cliente) {
     if (typeof u === "string" && u.trim()) return u.trim();
   }
   return "";
+}
+
+// Helper: obtiene ids de lente desde la tabla lentes_catalogos (soporta distintos nombres)
+function pickLensId(row) {
+  return (
+    row?.lente_id ||
+    row?.lens_id ||
+    row?.id_lente ||
+    row?.lente ||
+    row?.lens ||
+    null
+  );
 }
 
 async function loadClientConfig() {
@@ -158,35 +165,11 @@ async function loadClientConfig() {
   window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
   window.__client.default_url = pickFirstClientUrl(window.__client);
 
-  console.log("CLIENTE GLOBAL ✅", window.__client);
+  // Plan del cliente
+  const planRaw = String(cliente.plan || "ALL").trim();
+  const plan = planRaw.toUpperCase();
 
-  // Plan legacy (por si no hay catálogos cargados)
-  const plan = String(cliente.plan || "ALL").toUpperCase().trim();
-
-  // =========================
-  // 2) Catálogos permitidos (Cliente → Catálogo)
-  // =========================
-  // Tabla: lentes_catalogos (cliente_id, catalogo)
-  const { data: catData, error: catErr } = await db
-    .from("lentes_catalogos")
-    .select("catalogo")
-    .eq("cliente_id", cliente.id);
-
-  if (catErr) throw new Error("Error leyendo lentes_catalogos: " + catErr.message);
-
-  const catalogos = (catData || [])
-    .map(r => String(r.catalogo || "").toUpperCase().trim())
-    .filter(Boolean);
-
-  const hasCatalogs = catalogos.length > 0;
-  const hasALL = catalogos.includes("ALL");
-
-  // =========================
-  // 3) Traer lentes
-  // =========================
-  let gData = [];
-  let mode = "LEGACY";
-
+  // Base query de lentes (siempre del cliente y activos)
   const baseQ = () =>
     db
       .from("lentes")
@@ -194,51 +177,71 @@ async function loadClientConfig() {
       .eq("cliente_id", cliente.id)
       .eq("activo", true);
 
-  if (hasCatalogs) {
-    // ✅ MODO ESCALABLE POR CATALOGO(S)
-    if (hasALL) {
-      mode = "CATALOGOS_ALL";
-      const { data, error } = await baseQ();
-      if (error) throw new Error("Error leyendo lentes: " + error.message);
-      gData = data || [];
-    } else {
-      mode = `CATALOGOS_${catalogos.join("_")}`;
-      // IMPORTANTE: el campo "grupo" en lentes debe tener EXACTAMENTE esos valores (ej: NICOLAS / EZEQUIEL)
-      const { data, error } = await baseQ().in("grupo", catalogos);
-      if (error) throw new Error("Error leyendo lentes por catálogos: " + error.message);
-      gData = data || [];
-    }
+  // =========================
+  // 2) Traer lentes según plan
+  // =========================
+  let gData = [];
+  let mode = "ALL";
+
+  if (plan === "A" || plan === "B") {
+    // Legacy por grupo
+    mode = `GRUPO_${plan}`;
+    const { data, error } = await baseQ().eq("grupo", plan);
+    if (error) throw new Error("Error leyendo lentes: " + error.message);
+    gData = data || [];
+
+  } else if (plan === "ALL") {
+    // ALL = todos los lentes del cliente (sin depender de grupo)
+    mode = "ALL";
+    const { data, error } = await baseQ();
+    if (error) throw new Error("Error leyendo lentes: " + error.message);
+    gData = data || [];
+
   } else {
-    // ✅ FALLBACK LEGACY (si el cliente todavía no tiene filas en lentes_catalogos)
-    if (plan === "A" || plan === "B") {
-      mode = `LEGACY_GRUPO_${plan}`;
-      const { data, error } = await baseQ().eq("grupo", plan);
-      if (error) throw new Error("Error leyendo lentes: " + error.message);
+    // Modo catálogo: el plan puede ser "NICOLAS" o "EZEQUIEL"
+    // o varios separados por coma: "NICOLAS,EZEQUIEL"
+    const catalogos = plan
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    mode = `CATALOGOS_${catalogos.join("_")}`;
+
+    // 1) buscar asignaciones en lentes_catalogos por catalogo
+    const { data: mapData, error: mapErr } = await db
+      .from("lentes_catalogos")
+      .select("*")
+      .in("catalogo", catalogos);
+
+    if (mapErr) throw new Error("Error leyendo lentes_catalogos: " + mapErr.message);
+
+    const lensIds = (mapData || [])
+      .map(pickLensId)
+      .filter(Boolean);
+
+    // 2) traer lentes por ids + cliente_id
+    if (lensIds.length) {
+      const { data, error } = await baseQ().in("id", lensIds);
+      if (error) throw new Error("Error leyendo lentes por catálogo: " + error.message);
       gData = data || [];
     } else {
-      mode = "LEGACY_ALL";
-      const { data, error } = await baseQ();
-      if (error) throw new Error("Error leyendo lentes: " + error.message);
-      gData = data || [];
+      gData = [];
     }
+
+    // Guardamos para debug
+    window.__client.catalogos = catalogos;
   }
 
-  // Asignar
   lentes = gData || [];
 
   if (!lentes.length) {
     modelNameEl.textContent = "Sin lentes cargados";
   }
 
-  // ✅ DEBUG GLOBAL (2-3 líneas, NO rompe nada)
-  window.__lastLoadMode = mode;
-  window.__lastCatalogos = catalogos;
-  window.__lastLentes = lentes;
+  console.log("CLIENTE GLOBAL ✅", window.__client);
+  console.log("SLUG:", slug, "PLAN:", plan, "MODO:", mode, "LENTES:", lentes.length);
 
-  console.log("SLUG:", slug, "PLAN:", plan, "CATALOGOS:", catalogos, "MODO:", mode, "LENTES:", lentes.length);
-
-  // Devolver algo útil (no rompe nada, y ayuda al wrapper)
-  return { cliente, plan, catalogos, lentes, mode };
+  return { cliente, plan, lentes, mode };
 }
 
 /* =========================
