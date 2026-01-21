@@ -457,7 +457,7 @@ function startAR() {
   // En consola podés hacer: window.__LENS_SCALE__ = 1.0 / 0.88 / 1.10 etc
   function getLensScale() {
     const v = Number(window.__LENS_SCALE__);
-    return Number.isFinite(v) && v > 0 ? v : 0.90; // ✅ default recomendado
+    return Number.isFinite(v) && v > 0 ? v : 0.92; // ✅ default recomendado
   }
 
   faceMesh.onResults((results) => {
