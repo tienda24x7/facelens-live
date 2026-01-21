@@ -320,6 +320,11 @@ categoryFilter.onchange = aplicarFiltro;
    6) LENTES (carga imagen + botón producto)
 ========================= */
 
+// Asegurar referencia al botón sin romper nada
+const productBtnSafe = (typeof productBtn !== "undefined" && productBtn)
+  ? productBtn
+  : document.getElementById("productBtn");
+
 function buildWhatsAppUrl(phone, lens) {
   const p = normalizePhone(phone);
   if (!p) return "";
@@ -332,8 +337,15 @@ function buildWhatsAppUrl(phone, lens) {
   return `https://wa.me/${p}?text=${encodeURIComponent(msg)}`;
 }
 
+function pickFirstUrlFromCandidates(candidates) {
+  for (const u of candidates) {
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return "";
+}
+
 function pickFirstUrl(lens) {
-  const candidates = [
+  return pickFirstUrlFromCandidates([
     lens?.product_url,
     lens?.productUrl,
     lens?.ml_url,
@@ -341,33 +353,41 @@ function pickFirstUrl(lens) {
     lens?.web_url,
     lens?.tienda_url,
     lens?.url,
-  ];
-  for (const u of candidates) {
-    if (typeof u === "string" && u.trim()) return u.trim();
-  }
-  return "";
+  ]);
 }
 
 function getClientWhatsApp() {
   const c = window.__client || {};
-  // usamos el normalizado que seteamos en el bloque 4
   const wa = c.whatsapp_norm || c.whatsapp || c.WhatsApp || "";
   return String(wa || "").trim();
 }
 
 function getClientDefaultUrl() {
   const c = window.__client || {};
-  return (
-    (typeof c.default_url === "string" && c.default_url.trim()) ? c.default_url.trim()
-    : pickFirstClientUrl(c)
-  );
+
+  // Prioridad de URL a nivel cliente (por si cambia el nombre de columna)
+  return pickFirstUrlFromCandidates([
+    c.default_url,
+    c.defaultUrl,
+    c.cliente_url,
+    c.product_url,
+    c.productUrl,
+    c.ml_url,
+    c.mercadolibre_url,
+    c.web_url,
+    c.tienda_url,
+    c.url,
+    c.link,
+  ]);
 }
 
 function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
   // ✅ FIX CLAVE: NO tocar currentIndex acá
-  const safeIndex = ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
+  const safeIndex =
+    ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
+
   const lens = lentesFiltrados[safeIndex];
 
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
@@ -391,18 +411,22 @@ function loadCurrentLens() {
     total: lentesFiltrados.length
   });
 
-  if (finalUrl) {
-    productBtn.classList.remove("hidden");
-    productBtn.style.display = "inline-flex";     // fuerza visible en el layout
-    productBtn.style.alignItems = "center";
-    productBtn.style.justifyContent = "center";
+  if (productBtnSafe) {
+    if (finalUrl) {
+      productBtnSafe.classList.remove("hidden");
+      productBtnSafe.style.display = "inline-flex";
+      productBtnSafe.style.alignItems = "center";
+      productBtnSafe.style.justifyContent = "center";
 
-    // ✅ Siempre el mismo texto
-    productBtn.textContent = "🛒 Ver producto";
-    productBtn.onclick = () => window.open(finalUrl, "_blank", "noopener");
+      // ✅ Siempre el mismo texto
+      productBtnSafe.textContent = "🛒 Ver producto";
+      productBtnSafe.onclick = () => window.open(finalUrl, "_blank", "noopener");
+    } else {
+      productBtnSafe.classList.add("hidden");
+      productBtnSafe.onclick = null;
+    }
   } else {
-    productBtn.classList.add("hidden");
-    productBtn.onclick = null;
+    console.warn("⚠️ No se encontró #productBtn en el DOM.");
   }
 
   // =========================
