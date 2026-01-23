@@ -477,21 +477,21 @@ function startAR() {
   const lerp = (a,b,t)=>a+(b-a)*t;
   const normAngle = (a)=>Math.atan2(Math.sin(a), Math.cos(a));
 
-  // Perfil dispositivo
+  // Perfil dispositivo (priorizamos width real de pantalla)
   function isMobileDevice() {
+    const w = Math.min(window.innerWidth || 9999, screen?.width || 9999);
     return (
-      window.matchMedia?.("(max-width: 768px)")?.matches ||
+      w <= 820 ||
+      window.matchMedia?.("(pointer: coarse)")?.matches ||
       /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     );
   }
 
-  // ✅ ZOOM configurable sin tocar código:
-  // En consola: window.__LENS_SCALE__ = 1.10 (ej)
+  // ✅ Override opcional desde consola:
+  // window.__LENS_SCALE__ = 1.0 / 1.2 / 1.4 ...
   function getLensScaleDefault() {
-    // Default distinto por dispositivo
-    // Mobile: más grande
-    // Desktop: más contenido
-    return isMobileDevice() ? 1.18 : 0.90;
+    // En tu caso mobile sigue chico → subimos el default MOBILE bastante
+    return isMobileDevice() ? 1.55 : 0.90; // Desktop queda igual que “ok”
   }
 
   function getLensScale() {
@@ -499,16 +499,19 @@ function startAR() {
     return Number.isFinite(v) && v > 0 ? v : getLensScaleDefault();
   }
 
-  function getMaxWRatio() {
-    // Límite máximo (ratio del ancho del canvas)
-    // Mobile: permite crecer más
-    // Desktop: limita más (para que no tape la cara)
-    return isMobileDevice() ? 0.42 : 0.26;
-  }
-
-  function getMinW() {
-    // Mínimo para que no “se pierda”
-    return isMobileDevice() ? 140 : 110;
+  function getParams() {
+    if (isMobileDevice()) {
+      return {
+        baseFactor: 2.35,      // 🔥 más grande en mobile (antes 1.85)
+        maxWRatio: 0.58,       // 🔥 permite crecer más en mobile
+        minW: 210              // 🔥 mínimo más alto para que no “se pierda”
+      };
+    }
+    return {
+      baseFactor: 1.85,        // Desktop como venía (te funciona bien)
+      maxWRatio: 0.26,
+      minW: 110
+    };
   }
 
   faceMesh.onResults((results) => {
@@ -545,7 +548,6 @@ function startAR() {
     const targetX = nx;
     const targetY = ny + eyeDist * 0.06;
 
-    // suavizado (menos temblor)
     const T = 0.18;
 
     if (smoothX === null) {
@@ -559,15 +561,15 @@ function startAR() {
       smoothA = normAngle(smoothA + da * T);
     }
 
-    // ✅ Tamaño estable con zoom + límites por dispositivo
+    // ✅ Tamaño estable con parámetros por dispositivo
     const scale = getLensScale();
+    const { baseFactor, maxWRatio, minW } = getParams();
 
-    // Base proporcional a distancia de ojos
-    const baseW = smoothD * 1.85 * scale;
+    // Base proporcional a distancia de ojos (más agresivo en mobile)
+    const baseW = smoothD * baseFactor * scale;
 
     // Cap por dispositivo
-    const maxW = canvas.width * getMaxWRatio();
-    const minW = getMinW();
+    const maxW = canvas.width * maxWRatio;
 
     const targetW = Math.max(minW, Math.min(baseW, maxW));
     const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
