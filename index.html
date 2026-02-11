@@ -381,7 +381,156 @@ function getClientDefaultUrl() {
   ]);
 }
 
-function loadCurrentLens() {
+/* =========================
+   ✅ NUEVO: helpers para armar URLs de Storage por SKU
+========================= */
+
+// 1) Base del proyecto Supabase (ya la tenés hardcodeada en tus imagen_url actuales)
+// Si algún día cambia, lo ideal es guardar esta base en una config.
+const SUPABASE_PROJECT_URL = "https://romgbrobvperljaviekj.supabase.co";
+
+// 2) Bucket público donde subís
+const STORAGE_BUCKET = "facelens-assets";
+
+// 3) Carpeta de lentes dentro del bucket (según tu estructura actual)
+function getLensFolderForClient() {
+  const c = window.__client || {};
+  // Preferimos slug (tienda24x7_demo, catalogo_global, etc.)
+  const slug = (c.slug || "").trim();
+  // Si no hay slug, caemos a "default"
+  return slug || "default";
+}
+
+// arma URL pública a un archivo dentro del bucket
+function buildPublicStorageUrl(pathInBucket) {
+  // ejemplo final:
+  // https://...supabase.co/storage/v1/object/public/facelens-assets/lentes/tienda24x7_demo/100101.png
+  const clean = String(pathInBucket || "").replace(/^\/+/, "");
+  return `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
+}
+
+// Normaliza SKU tipo "100101", "SKU_100101", "100101 app" -> "100101"
+function normalizeSku(sku) {
+  const s = String(sku || "").trim();
+  if (!s) return "";
+  // deja solo letras/numeros/guiones/underscore y luego intenta capturar un bloque numérico largo
+  const cleaned = s.replace(/\s+/g, "_");
+  const m = cleaned.match(/(\d{5,})/); // 100101, 100565, etc.
+  return m ? m[1] : cleaned;
+}
+
+// Devuelve candidatos de assets por SKU (4PNG -> 2PNG -> 1PNG)
+function getAssetCandidatesForLens(lens) {
+  const skuRaw = lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "";
+  const sku = normalizeSku(skuRaw);
+
+  const folder = getLensFolderForClient(); // ej tienda24x7_demo
+  const basePath = `lentes/${folder}/`;
+
+  // Si no hay SKU, solo podemos caer al imagen_url que venga en DB
+  if (!sku) {
+    const fallback = String(lens?.imagen_url || "").trim();
+    return {
+      mode: "single",
+      single: fallback ? { url: fallback } : null,
+      two: null,
+      four: null
+    };
+  }
+
+  // Convenciones de nombres:
+  // 1PNG:   {sku}.png
+  // 2PNG:   {sku}_frame.png  + {sku}_lens.png
+  // 4PNG:   {sku}_frame.png  + {sku}_lens.png + {sku}_left_temple.png + {sku}_right_temple.png
+  const one = buildPublicStorageUrl(`${basePath}${sku}.png`);
+  const frame = buildPublicStorageUrl(`${basePath}${sku}_frame.png`);
+  const lensPng = buildPublicStorageUrl(`${basePath}${sku}_lens.png`);
+  const leftTemple = buildPublicStorageUrl(`${basePath}${sku}_left_temple.png`);
+  const rightTemple = buildPublicStorageUrl(`${basePath}${sku}_right_temple.png`);
+
+  // También dejamos tu imagen_url actual como fallback final (por si la DB trae link directo)
+  const dbImg = String(lens?.imagen_url || "").trim();
+
+  return {
+    mode: "auto",
+    single: { url: one, fallback: dbImg || "" },
+    two: { frame, lens: lensPng, fallback: one },
+    four: { frame, lens: lensPng, leftTemple, rightTemple, fallback: one }
+  };
+}
+
+// Carga una imagen y resuelve (sin tirar error)
+function loadImageSafe(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+// Intenta detectar automáticamente si existen 4PNG / 2PNG / 1PNG
+async function loadLensAssets(lens) {
+  const cand = getAssetCandidatesForLens(lens);
+
+  // Caso sin SKU: intentamos el imagen_url
+  if (cand.mode === "single") {
+    const img = cand.single?.url ? await loadImageSafe(cand.single.url) : null;
+    return { type: "single", single: img };
+  }
+
+  // 1) probar 4PNG (solo verificamos que frame y lens existan; temples opcionales)
+  const [frame4, lens4] = await Promise.all([
+    loadImageSafe(cand.four.frame),
+    loadImageSafe(cand.four.lens),
+  ]);
+
+  if (frame4 && lens4) {
+    // temples opcionales
+    const [tL, tR] = await Promise.all([
+      loadImageSafe(cand.four.leftTemple),
+      loadImageSafe(cand.four.rightTemple),
+    ]);
+
+    return { type: "four", frame: frame4, lens: lens4, leftTemple: tL, rightTemple: tR };
+  }
+
+  // 2) probar 2PNG
+  const [frame2, lens2] = await Promise.all([
+    loadImageSafe(cand.two.frame),
+    loadImageSafe(cand.two.lens),
+  ]);
+
+  if (frame2 && lens2) {
+    return { type: "two", frame: frame2, lens: lens2 };
+  }
+
+  // 3) fallback 1PNG
+  const one = await loadImageSafe(cand.single.url);
+  if (one) return { type: "single", single: one };
+
+  // 4) fallback final a imagen_url DB
+  const dbFallback = await loadImageSafe(cand.single.fallback || "");
+  return { type: "single", single: dbFallback };
+}
+
+/* =========================
+   ✅ NUEVO: variables globales para el render (compatibles con lo actual)
+========================= */
+let lensAssets = null;      // {type:'single'|'two'|'four', ...}
+let lensImgReady = false;   // ya existía en tu proyecto; la mantenemos
+let lensImg = null;         // mantenemos para compatibilidad (single)
+
+/* =========================
+   ✅ IMPORTANTE:
+   - Tu loop de render actual probablemente usa (lensImgReady && lensImg) para dibujar.
+   - Luego vamos a ajustar SOLO ese bloque de render para dibujar por capas.
+   - Por ahora dejamos cargado lensAssets y, si es single, también lensImg.
+========================= */
+
+async function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
   // ✅ FIX CLAVE: NO tocar currentIndex acá
@@ -430,18 +579,34 @@ function loadCurrentLens() {
   }
 
   // =========================
-  // Imagen
+  // ✅ NUEVO: Imagen (multi-PNG con fallback)
   // =========================
   lensImgReady = false;
-  const imgUrl = lens?.imagen_url || "";
-  if (!imgUrl) return;
+  lensImg = null;
+  lensAssets = null;
 
-  lensImg = new Image();
-  lensImg.crossOrigin = "anonymous";
-  lensImg.src = imgUrl;
+  // cargar assets
+  const assets = await loadLensAssets(lens);
+  lensAssets = assets;
 
-  lensImg.onload = () => { lensImgReady = true; };
-  lensImg.onerror = () => { lensImgReady = false; console.warn("No cargó imagen:", imgUrl); };
+  // compatibilidad con tu render actual: si es single, seteo lensImg
+  if (assets?.type === "single") {
+    lensImg = assets.single || null;
+  }
+
+  // Marcamos ready si al menos tenemos algo para mostrar
+  lensImgReady = !!(
+    (assets?.type === "single" && assets.single) ||
+    (assets?.type === "two" && assets.frame && assets.lens) ||
+    (assets?.type === "four" && assets.frame && assets.lens)
+  );
+
+  if (!lensImgReady) {
+    console.warn("No se pudo cargar assets del lente:", {
+      sku: lens?.sku,
+      imagen_url: lens?.imagen_url
+    });
+  }
 }
 
 /* Navegación */
@@ -456,6 +621,7 @@ nextBtn.onclick = () => {
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens();
 };
+
 
 /* =========================
    7) AR (FaceMesh + suavizado + tamaño estable)
@@ -502,16 +668,43 @@ function startAR() {
   function getParams() {
     if (isMobileDevice()) {
       return {
-        baseFactor: 2.35,      // 🔥 más grande en mobile (antes 1.85)
-        maxWRatio: 0.58,       // 🔥 permite crecer más en mobile
-        minW: 210              // 🔥 mínimo más alto para que no “se pierda”
+        baseFactor: 2.35,
+        maxWRatio: 0.58,
+        minW: 210
       };
     }
     return {
-      baseFactor: 1.85,        // Desktop como venía (te funciona bien)
+      baseFactor: 1.85,
       maxWRatio: 0.26,
       minW: 110
     };
+  }
+
+  // =========================
+  // ✅ NUEVO: Controles de realismo (opcionales)
+  // =========================
+  // 0.0 = totalmente transparente (no se ve el lente)
+  // 1.0 = como ahora (opaco). Recomendado: 0.45–0.70
+  function getLensAlpha() {
+    const v = Number(window.__LENS_ALPHA__);
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.60;
+  }
+
+  // Suaviza un poquito bordes del lente (sutil). 0 = sin blur
+  function getLensBlur() {
+    const v = Number(window.__LENS_BLUR__);
+    return Number.isFinite(v) ? Math.max(0, v) : 0; // probá 0.4–0.8 si querés
+  }
+
+  // Helper: decide si tenemos assets multi-PNG listos
+  function hasTwoAssets(a) {
+    return a && a.type === "two" && a.frame && a.lens;
+  }
+  function hasFourAssets(a) {
+    return a && a.type === "four" && a.frame && a.lens;
+  }
+  function hasSingle(a) {
+    return a && a.type === "single" && a.single;
   }
 
   faceMesh.onResults((results) => {
@@ -525,7 +718,12 @@ function startAR() {
 
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
-    if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
+
+    // ✅ Antes: exigía lensImg sí o sí.
+    // ✅ Ahora: aceptamos multi-assets (2/4) o single.
+    if (!lensImgReady) return;
+
+    const assets = (typeof lensAssets !== "undefined") ? lensAssets : null;
 
     const lm = faces[0];
 
@@ -565,20 +763,80 @@ function startAR() {
     const scale = getLensScale();
     const { baseFactor, maxWRatio, minW } = getParams();
 
-    // Base proporcional a distancia de ojos (más agresivo en mobile)
     const baseW = smoothD * baseFactor * scale;
-
-    // Cap por dispositivo
     const maxW = canvas.width * maxWRatio;
 
     const targetW = Math.max(minW, Math.min(baseW, maxW));
-    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+
+    // ✅ Elegimos aspect según lo que esté disponible
+    let aspect = 1;
+    if (hasFourAssets(assets)) {
+      aspect = assets.frame.naturalHeight / assets.frame.naturalWidth;
+    } else if (hasTwoAssets(assets)) {
+      aspect = assets.frame.naturalHeight / assets.frame.naturalWidth;
+    } else if (hasSingle(assets)) {
+      aspect = assets.single.naturalHeight / assets.single.naturalWidth;
+    } else if (typeof lensImg !== "undefined" && lensImg) {
+      aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+    } else {
+      return; // no hay nada que dibujar
+    }
+
     const targetH = targetW * aspect;
 
+    // =========================
+    // ✅ DIBUJO POR CAPAS
+    // 1) patillas atrás (si existen)
+    // 2) lente (con alpha para ver ojos)
+    // 3) marco adelante
+    // fallback: 1 PNG
+    // =========================
     ctx.save();
     ctx.translate(smoothX, smoothY);
     ctx.rotate(smoothA);
-    ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
+
+    // 1) PATILLAS (atrás)
+    if (hasFourAssets(assets)) {
+      // opcionales: si existen se dibujan
+      if (assets.leftTemple) {
+        ctx.drawImage(assets.leftTemple, -targetW/2, -targetH/2, targetW, targetH);
+      }
+      if (assets.rightTemple) {
+        ctx.drawImage(assets.rightTemple, -targetW/2, -targetH/2, targetW, targetH);
+      }
+    }
+
+    // 2) LENTE (ojos visibles)
+    const lensAlpha = getLensAlpha();
+    const lensBlur = getLensBlur();
+
+    if (hasFourAssets(assets) || hasTwoAssets(assets)) {
+      const lensImgLayer = assets.lens;
+
+      // blur sutil sólo sobre la capa del lente
+      if (lensBlur > 0) ctx.filter = `blur(${lensBlur}px)`;
+      ctx.globalAlpha = lensAlpha;
+      ctx.drawImage(lensImgLayer, -targetW/2, -targetH/2, targetW, targetH);
+      ctx.globalAlpha = 1;
+      ctx.filter = "none";
+    } else {
+      // fallback single (como estaba antes)
+      const singleImg =
+        (hasSingle(assets) ? assets.single : null) ||
+        (typeof lensImg !== "undefined" ? lensImg : null);
+
+      if (singleImg && singleImg.naturalWidth > 0) {
+        ctx.drawImage(singleImg, -targetW/2, -targetH/2, targetW, targetH);
+      }
+      ctx.restore();
+      return;
+    }
+
+    // 3) MARCO (adelante)
+    if (hasFourAssets(assets) || hasTwoAssets(assets)) {
+      ctx.drawImage(assets.frame, -targetW/2, -targetH/2, targetW, targetH);
+    }
+
     ctx.restore();
   });
 
