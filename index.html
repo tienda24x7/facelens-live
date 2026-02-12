@@ -648,6 +648,9 @@ function startAR() {
   const lerp = (a,b,t)=>a+(b-a)*t;
   const normAngle = (a)=>Math.atan2(Math.sin(a), Math.cos(a));
 
+  // ✅ Ajuste global de tamaño (10% más)
+  const GLOBAL_SIZE = 1.10;
+
   // Perfil dispositivo (priorizamos width real de pantalla)
   function isMobileDevice() {
     const w = Math.min(window.innerWidth || 9999, screen?.width || 9999);
@@ -661,8 +664,7 @@ function startAR() {
   // ✅ Override opcional desde consola:
   // window.__LENS_SCALE__ = 1.0 / 1.2 / 1.4 ...
   function getLensScaleDefault() {
-    // En tu caso mobile sigue chico → subimos el default MOBILE bastante
-    return isMobileDevice() ? 1.55 : 0.90; // Desktop queda igual que “ok”
+    return isMobileDevice() ? 1.55 : 0.90;
   }
 
   function getLensScale() {
@@ -685,33 +687,6 @@ function startAR() {
     };
   }
 
-  // =========================
-  // ✅ NUEVO: Controles de realismo (opcionales)
-  // =========================
-  // 0.0 = totalmente transparente (no se ve el lente)
-  // 1.0 = como ahora (opaco). Recomendado: 0.45–0.70
-  function getLensAlpha() {
-    const v = Number(window.__LENS_ALPHA__);
-    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.60;
-  }
-
-  // Suaviza un poquito bordes del lente (sutil). 0 = sin blur
-  function getLensBlur() {
-    const v = Number(window.__LENS_BLUR__);
-    return Number.isFinite(v) ? Math.max(0, v) : 0; // probá 0.4–0.8 si querés
-  }
-
-  // Helper: decide si tenemos assets multi-PNG listos
-  function hasTwoAssets(a) {
-    return a && a.type === "two" && a.frame && a.lens;
-  }
-  function hasFourAssets(a) {
-    return a && a.type === "four" && a.frame && a.lens;
-  }
-  function hasSingle(a) {
-    return a && a.type === "single" && a.single;
-  }
-
   faceMesh.onResults((results) => {
     if (!video.videoWidth || !video.videoHeight) return;
 
@@ -724,11 +699,11 @@ function startAR() {
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
 
-    // ✅ Antes: exigía lensImg sí o sí.
-    // ✅ Ahora: aceptamos multi-assets (2/4) o single.
-    if (!lensImgReady) return;
-
-    const assets = (typeof lensAssets !== "undefined") ? lensAssets : null;
+    // Si todavía no hay nada cargado, no dibujamos
+    if (!window.__drawARLayered) {
+      // fallback ultra simple si todavía no integraste capas en el render:
+      if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
+    }
 
     const lm = faces[0];
 
@@ -768,80 +743,34 @@ function startAR() {
     const scale = getLensScale();
     const { baseFactor, maxWRatio, minW } = getParams();
 
-    const baseW = smoothD * baseFactor * scale;
+    // ✅ +10% global aplicado acá
+    const baseW = smoothD * baseFactor * scale * GLOBAL_SIZE;
+
     const maxW = canvas.width * maxWRatio;
 
     const targetW = Math.max(minW, Math.min(baseW, maxW));
 
-    // ✅ Elegimos aspect según lo que esté disponible
-    let aspect = 1;
-    if (hasFourAssets(assets)) {
-      aspect = assets.frame.naturalHeight / assets.frame.naturalWidth;
-    } else if (hasTwoAssets(assets)) {
-      aspect = assets.frame.naturalHeight / assets.frame.naturalWidth;
-    } else if (hasSingle(assets)) {
-      aspect = assets.single.naturalHeight / assets.single.naturalWidth;
-    } else if (typeof lensImg !== "undefined" && lensImg) {
-      aspect = lensImg.naturalHeight / lensImg.naturalWidth;
-    } else {
-      return; // no hay nada que dibujar
-    }
-
-    const targetH = targetW * aspect;
-
     // =========================
-    // ✅ DIBUJO POR CAPAS
-    // 1) patillas atrás (si existen)
-    // 2) lente (con alpha para ver ojos)
-    // 3) marco adelante
-    // fallback: 1 PNG
+    // DIBUJO (delegamos a tu render por capas si existe)
     // =========================
-    ctx.save();
-    ctx.translate(smoothX, smoothY);
-    ctx.rotate(smoothA);
-
-    // 1) PATILLAS (atrás)
-    if (hasFourAssets(assets)) {
-      // opcionales: si existen se dibujan
-      if (assets.leftTemple) {
-        ctx.drawImage(assets.leftTemple, -targetW/2, -targetH/2, targetW, targetH);
-      }
-      if (assets.rightTemple) {
-        ctx.drawImage(assets.rightTemple, -targetW/2, -targetH/2, targetW, targetH);
-      }
-    }
-
-    // 2) LENTE (ojos visibles)
-    const lensAlpha = getLensAlpha();
-    const lensBlur = getLensBlur();
-
-    if (hasFourAssets(assets) || hasTwoAssets(assets)) {
-      const lensImgLayer = assets.lens;
-
-      // blur sutil sólo sobre la capa del lente
-      if (lensBlur > 0) ctx.filter = `blur(${lensBlur}px)`;
-      ctx.globalAlpha = lensAlpha;
-      ctx.drawImage(lensImgLayer, -targetW/2, -targetH/2, targetW, targetH);
-      ctx.globalAlpha = 1;
-      ctx.filter = "none";
-    } else {
-      // fallback single (como estaba antes)
-      const singleImg =
-        (hasSingle(assets) ? assets.single : null) ||
-        (typeof lensImg !== "undefined" ? lensImg : null);
-
-      if (singleImg && singleImg.naturalWidth > 0) {
-        ctx.drawImage(singleImg, -targetW/2, -targetH/2, targetW, targetH);
-      }
-      ctx.restore();
+    if (typeof window.__drawARLayered === "function") {
+      window.__drawARLayered(ctx, {
+        x: smoothX,
+        y: smoothY,
+        angle: smoothA,
+        w: targetW
+      });
       return;
     }
 
-    // 3) MARCO (adelante)
-    if (hasFourAssets(assets) || hasTwoAssets(assets)) {
-      ctx.drawImage(assets.frame, -targetW/2, -targetH/2, targetW, targetH);
-    }
+    // Fallback: single lensImg
+    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+    const targetH = targetW * aspect;
 
+    ctx.save();
+    ctx.translate(smoothX, smoothY);
+    ctx.rotate(smoothA);
+    ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
     ctx.restore();
   });
 
