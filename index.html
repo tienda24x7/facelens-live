@@ -386,7 +386,6 @@ function getClientDefaultUrl() {
 ========================= */
 
 // 1) Base del proyecto Supabase (ya la tenés hardcodeada en tus imagen_url actuales)
-// Si algún día cambia, lo ideal es guardar esta base en una config.
 const SUPABASE_PROJECT_URL = "https://romgbrobvperljaviekj.supabase.co";
 
 // 2) Bucket público donde subís
@@ -395,16 +394,11 @@ const STORAGE_BUCKET = "facelens-assets";
 // 3) Carpeta de lentes dentro del bucket (según tu estructura actual)
 function getLensFolderForClient() {
   const c = window.__client || {};
-  // Preferimos slug (tienda24x7_demo, catalogo_global, etc.)
-  const slug = (c.slug || "").trim();
-  // Si no hay slug, caemos a "default"
-  return slug || "default";
+  const s = String(c.slug || "").trim();
+  return s || "default";
 }
 
-// arma URL pública a un archivo dentro del bucket
 function buildPublicStorageUrl(pathInBucket) {
-  // ejemplo final:
-  // https://...supabase.co/storage/v1/object/public/facelens-assets/lentes/tienda24x7_demo/100101.png
   const clean = String(pathInBucket || "").replace(/^\/+/, "");
   return `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
 }
@@ -413,13 +407,12 @@ function buildPublicStorageUrl(pathInBucket) {
 function normalizeSku(sku) {
   const s = String(sku || "").trim();
   if (!s) return "";
-  // deja solo letras/numeros/guiones/underscore y luego intenta capturar un bloque numérico largo
   const cleaned = s.replace(/\s+/g, "_");
   const m = cleaned.match(/(\d{5,})/); // 100101, 100565, etc.
   return m ? m[1] : cleaned;
 }
 
-// Devuelve candidatos de assets por SKU (4PNG -> 2PNG -> 1PNG)
+// Candidatos de assets por SKU (4PNG -> 2PNG -> 1PNG)
 function getAssetCandidatesForLens(lens) {
   const skuRaw = lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "";
   const sku = normalizeSku(skuRaw);
@@ -427,39 +420,49 @@ function getAssetCandidatesForLens(lens) {
   const folder = getLensFolderForClient(); // ej tienda24x7_demo
   const basePath = `lentes/${folder}/`;
 
+  // fallback final a imagen_url DB (si viene link directo)
+  const dbImg = String(lens?.imagen_url || "").trim();
+
   // Si no hay SKU, solo podemos caer al imagen_url que venga en DB
   if (!sku) {
-    const fallback = String(lens?.imagen_url || "").trim();
     return {
-      mode: "single",
-      single: fallback ? { url: fallback } : null,
-      two: null,
-      four: null
+      mode: "no_sku",
+      dbImg
     };
   }
 
-  // Convenciones de nombres:
-  // 1PNG:   {sku}.png
-  // 2PNG:   {sku}_frame.png  + {sku}_lens.png
-  // 4PNG:   {sku}_frame.png  + {sku}_lens.png + {sku}_left_temple.png + {sku}_right_temple.png
   const one = buildPublicStorageUrl(`${basePath}${sku}.png`);
+
   const frame = buildPublicStorageUrl(`${basePath}${sku}_frame.png`);
   const lensPng = buildPublicStorageUrl(`${basePath}${sku}_lens.png`);
+
+  // Patillas (opcionales). Usamos nombres “estándar” y algunos aliases por si cambian
   const leftTemple = buildPublicStorageUrl(`${basePath}${sku}_left_temple.png`);
   const rightTemple = buildPublicStorageUrl(`${basePath}${sku}_right_temple.png`);
 
-  // También dejamos tu imagen_url actual como fallback final (por si la DB trae link directo)
-  const dbImg = String(lens?.imagen_url || "").trim();
+  const leftArm = buildPublicStorageUrl(`${basePath}${sku}_left_arm.png`);
+  const rightArm = buildPublicStorageUrl(`${basePath}${sku}_right_arm.png`);
+
+  const arms = buildPublicStorageUrl(`${basePath}${sku}_arms.png`); // alternativa 1 sola imagen
 
   return {
-    mode: "auto",
-    single: { url: one, fallback: dbImg || "" },
+    mode: "sku",
+    sku,
+    single: { url: one, dbFallback: dbImg },
     two: { frame, lens: lensPng, fallback: one },
-    four: { frame, lens: lensPng, leftTemple, rightTemple, fallback: one }
+    four: {
+      frame,
+      lens: lensPng,
+      leftTemple,
+      rightTemple,
+      leftArm,
+      rightArm,
+      arms,
+      fallback: one
+    }
   };
 }
 
-// Carga una imagen y resuelve (sin tirar error)
 function loadImageSafe(url) {
   return new Promise((resolve) => {
     if (!url) return resolve(null);
@@ -471,67 +474,75 @@ function loadImageSafe(url) {
   });
 }
 
-// Intenta detectar automáticamente si existen 4PNG / 2PNG / 1PNG
+// Intenta detectar automáticamente si existen 4/3/2/1 PNG
 async function loadLensAssets(lens) {
   const cand = getAssetCandidatesForLens(lens);
 
-  // Caso sin SKU: intentamos el imagen_url
-  if (cand.mode === "single") {
-    const img = cand.single?.url ? await loadImageSafe(cand.single.url) : null;
+  // Sin SKU → imagen_url de DB (si existe)
+  if (cand.mode === "no_sku") {
+    const img = await loadImageSafe(cand.dbImg);
     return { type: "single", single: img };
   }
 
-  // 1) probar 4PNG (solo verificamos que frame y lens existan; temples opcionales)
-  const [frame4, lens4] = await Promise.all([
-    loadImageSafe(cand.four.frame),
-    loadImageSafe(cand.four.lens),
-  ]);
-
-  if (frame4 && lens4) {
-    // temples opcionales
-    const [tL, tR] = await Promise.all([
-      loadImageSafe(cand.four.leftTemple),
-      loadImageSafe(cand.four.rightTemple),
-    ]);
-
-    return { type: "four", frame: frame4, lens: lens4, leftTemple: tL, rightTemple: tR };
-  }
-
-  // 2) probar 2PNG
-  const [frame2, lens2] = await Promise.all([
+  // 1) Probar frame + lens (base para 2 o 4)
+  const [frameBase, lensBase] = await Promise.all([
     loadImageSafe(cand.two.frame),
     loadImageSafe(cand.two.lens),
   ]);
 
-  if (frame2 && lens2) {
-    return { type: "two", frame: frame2, lens: lens2 };
+  if (frameBase && lensBase) {
+    // 1a) Probar “arms” única (más simple)
+    const armsImg = await loadImageSafe(cand.four.arms);
+
+    if (armsImg) {
+      return { type: "four", frame: frameBase, lens: lensBase, arms: armsImg };
+    }
+
+    // 1b) Probar left/right (templos o arms)
+    const [tL, tR, aL, aR] = await Promise.all([
+      loadImageSafe(cand.four.leftTemple),
+      loadImageSafe(cand.four.rightTemple),
+      loadImageSafe(cand.four.leftArm),
+      loadImageSafe(cand.four.rightArm),
+    ]);
+
+    // Si hay al menos un par válido, devolvemos four
+    const left = tL || aL || null;
+    const right = tR || aR || null;
+
+    if (left || right) {
+      return { type: "four", frame: frameBase, lens: lensBase, leftTemple: left, rightTemple: right };
+    }
+
+    // Si no hay patillas, queda en 2 capas
+    return { type: "two", frame: frameBase, lens: lensBase };
   }
 
-  // 3) fallback 1PNG
+  // 2) fallback 1PNG por SKU
   const one = await loadImageSafe(cand.single.url);
   if (one) return { type: "single", single: one };
 
-  // 4) fallback final a imagen_url DB
-  const dbFallback = await loadImageSafe(cand.single.fallback || "");
+  // 3) fallback final a imagen_url DB
+  const dbFallback = await loadImageSafe(cand.single.dbFallback || "");
   return { type: "single", single: dbFallback };
 }
 
 /* =========================
    ✅ NUEVO: variables globales para el render (compatibles con lo actual)
+   (NO redeclaramos lensImgReady / lensImg, ya viven en bloque 3)
 ========================= */
-let lensAssets = null;      // {type:'single'|'two'|'four', ...}
+let lensAssets = null; // {type:'single'|'two'|'four', ...}
 
 /* =========================
    ✅ IMPORTANTE:
-   - Tu loop de render actual probablemente usa (lensImgReady && lensImg) para dibujar.
-   - Luego vamos a ajustar SOLO ese bloque de render para dibujar por capas.
-   - Por ahora dejamos cargado lensAssets y, si es single, también lensImg.
+   - Tu render actual usa (lensImgReady && lensImg) para dibujar.
+   - Por ahora: si es single, seteamos lensImg para compatibilidad.
+   - Luego en bloque 7 dibujamos por capas usando lensAssets.
 ========================= */
 
 async function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
 
-  // ✅ FIX CLAVE: NO tocar currentIndex acá
   const safeIndex =
     ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
 
@@ -565,7 +576,6 @@ async function loadCurrentLens() {
       productBtnSafe.style.alignItems = "center";
       productBtnSafe.style.justifyContent = "center";
 
-      // ✅ Siempre el mismo texto
       productBtnSafe.textContent = "🛒 Ver producto";
       productBtnSafe.onclick = () => window.open(finalUrl, "_blank", "noopener");
     } else {
@@ -577,13 +587,12 @@ async function loadCurrentLens() {
   }
 
   // =========================
-  // ✅ NUEVO: Imagen (multi-PNG con fallback)
+  // ✅ Imagen (multi-PNG con fallback)
   // =========================
   lensImgReady = false;
   lensImg = null;
   lensAssets = null;
 
-  // cargar assets
   const assets = await loadLensAssets(lens);
   lensAssets = assets;
 
@@ -592,7 +601,6 @@ async function loadCurrentLens() {
     lensImg = assets.single || null;
   }
 
-  // Marcamos ready si al menos tenemos algo para mostrar
   lensImgReady = !!(
     (assets?.type === "single" && assets.single) ||
     (assets?.type === "two" && assets.frame && assets.lens) ||
@@ -619,7 +627,6 @@ nextBtn.onclick = () => {
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens();
 };
-
 
 /* =========================
    7) AR (FaceMesh + suavizado + tamaño estable)
