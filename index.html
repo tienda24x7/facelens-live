@@ -629,7 +629,7 @@ nextBtn.onclick = () => {
 };
 
 /* =========================
-   7) AR (FaceMesh + suavizado + zoom móvil correcto)
+   7) AR (FaceMesh + suavizado + zoom OK en móvil sin romper PC)
 ========================= */
 function startAR() {
   const faceMesh = new FaceMesh({
@@ -644,10 +644,13 @@ function startAR() {
     selfieMode: true,
   });
 
-  let smoothX = null, smoothY = null, smoothA = null, smoothS = null; // S = size signal (normalizado)
+  let smoothX = null, smoothY = null, smoothA = null;
+  let smoothD = null; // distancia ojos suavizada (px) para desktop
+  let smoothS = null; // ratio suavizado (solo móvil)
   const lerp = (a,b,t)=>a+(b-a)*t;
   const normAngle = (a)=>Math.atan2(Math.sin(a), Math.cos(a));
 
+  // Perfil dispositivo
   function isMobileDevice() {
     const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
     return (
@@ -662,47 +665,36 @@ function startAR() {
   function getLensScaleDefault() {
     return isMobileDevice() ? 1.15 : 0.90;
   }
-
   function getLensScale() {
     const v = Number(window.__LENS_SCALE__);
     return Number.isFinite(v) && v > 0 ? v : getLensScaleDefault();
   }
 
-  // Parámetros por dispositivo
+  // Params por dispositivo (NO iguales)
   function getParams() {
     if (isMobileDevice()) {
       return {
-        maxWRatio: 0.62,  // permite crecer en móvil
-        minWRatio: 0.18,  // ✅ mínimo relativo al canvas, NO fijo en px
         Tpos: 0.18,
-        Ts: 0.35          // ✅ suavizado del "zoom" (rápido)
+        Tsize: 0.32,     // zoom móvil responde más rápido
+        maxWRatio: 0.62, // permite crecer
+        minWRatio: 0.06, // ✅ CLAVE: deja achicar MUCHO al alejarse
+        // mapeo de eyeNorm -> ratioW:
+        // lejos (eyeNorm ~0.08-0.11) => ratio pequeño
+        // cerca (eyeNorm ~0.16-0.22) => ratio grande
+        k: 3.9,
+        b: 0.00,
+        clampMin: 0.06,  // ✅ CLAVE: mínimo bajo (antes te lo planchaba)
+        clampMax: 0.85
       };
     }
+    // Desktop: volvemos a lo que ya te había quedado bien
     return {
-      maxWRatio: 0.26,
-      minWRatio: 0.10,
       Tpos: 0.18,
-      Ts: 0.18
+      Tsize: 0.18,
+      baseFactor: 1.85,
+      maxWRatio: 0.26,
+      minWpx: 110
     };
-  }
-
-  // Convierte "eyeDist normalizado" (0..1) a un ratio de ancho de lente (0..1)
-  // ✅ Esto es lo que hace que el zoom funcione igual en móvil/desktop.
-  function eyeNormToWidthRatio(eyeNorm, mobile) {
-    // eyeNorm típico:
-    // - lejos: ~0.10 - 0.14
-    // - normal: ~0.14 - 0.18
-    // - cerca: ~0.18 - 0.24 (depende cámara)
-    // Mapeo lineal con clamps, distinto por dispositivo.
-    if (mobile) {
-      const a = 2.55; // pendiente
-      const b = 0.05; // offset
-      return Math.max(0.12, Math.min(0.75, a * eyeNorm + b));
-    } else {
-      const a = 1.85;
-      const b = 0.02;
-      return Math.max(0.10, Math.min(0.40, a * eyeNorm + b));
-    }
   }
 
   faceMesh.onResults((results) => {
@@ -717,8 +709,15 @@ function startAR() {
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
 
-    const lm = faces[0];
+    // Si tenés renderer por capas, lo usa. Si no, fallback a lensImg.
+    const hasLayered = (typeof window.__drawARLayered === "function");
 
+    // Fallback single PNG
+    if (!hasLayered) {
+      if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
+    }
+
+    const lm = faces[0];
     const L = lm[33];
     const R = lm[263];
     const N = lm[168];
@@ -734,58 +733,65 @@ function startAR() {
     const dy = ry - ly;
 
     const eyeDistPx = Math.hypot(dx, dy);
-
-    // ✅ SEÑAL CLAVE: normalizada por ancho del canvas
-    const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
-
     const angle = Math.atan2(dy, dx);
 
     const targetX = nx;
     const targetY = ny + eyeDistPx * 0.06;
 
-    const mobile = isMobileDevice();
-    const { maxWRatio, minWRatio, Tpos, Ts } = getParams();
     const scale = getLensScale();
+    const mobile = isMobileDevice();
+    const P = getParams();
 
-    // ✅ Ratio deseado según distancia (normalizado)
-    const desiredRatio = eyeNormToWidthRatio(eyeNorm, mobile) * scale;
-
+    // suavizado pose
     if (smoothX === null) {
       smoothX = targetX;
       smoothY = targetY;
       smoothA = angle;
-      smoothS = desiredRatio;
+      smoothD = eyeDistPx;
+      smoothS = (eyeDistPx / Math.max(1, canvas.width)); // init
     } else {
-      smoothX = lerp(smoothX, targetX, Tpos);
-      smoothY = lerp(smoothY, targetY, Tpos);
+      smoothX = lerp(smoothX, targetX, P.Tpos);
+      smoothY = lerp(smoothY, targetY, P.Tpos);
 
       const da = normAngle(angle - smoothA);
-      smoothA = normAngle(smoothA + da * Tpos);
+      smoothA = normAngle(smoothA + da * P.Tpos);
 
-      // ✅ suavizado del “zoom”
-      smoothS = lerp(smoothS, desiredRatio, Ts);
+      smoothD = lerp(smoothD, eyeDistPx, P.Tpos);
     }
 
-    // ✅ ancho final (en px) por ratio del canvas
-    const maxW = canvas.width * maxWRatio;
-    const minW = canvas.width * minWRatio;
+    let targetW;
 
-    const baseW = canvas.width * smoothS;
-    const targetW = Math.max(minW, Math.min(baseW, maxW));
+    if (mobile) {
+      // ✅ MÓVIL: usamos eyeNorm para que NO dependa de cómo escala el video en pantalla
+      const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
 
-    // ✅ Dibujo por capas si existe (tu renderer)
-    if (typeof window.__drawARLayered === "function") {
-      window.__drawARLayered(ctx, {
-        x: smoothX,
-        y: smoothY,
-        angle: smoothA,
-        w: targetW
-      });
+      // ratio deseado (sin planchar)
+      let desiredRatio = (P.k * eyeNorm + P.b) * scale;
+      desiredRatio = Math.max(P.clampMin, Math.min(P.clampMax, desiredRatio));
+
+      // suavizado de zoom
+      smoothS = (smoothS === null) ? desiredRatio : lerp(smoothS, desiredRatio, P.Tsize);
+
+      const maxW = canvas.width * P.maxWRatio;
+      const minW = canvas.width * P.minWRatio;
+
+      const baseW = canvas.width * smoothS;
+      targetW = Math.max(minW, Math.min(baseW, maxW));
+
+    } else {
+      // ✅ DESKTOP: volvemos al método anterior (te estaba funcionando bien)
+      const baseW = smoothD * P.baseFactor * scale;
+      const maxW = canvas.width * P.maxWRatio;
+      const minW = P.minWpx;
+
+      targetW = Math.max(minW, Math.min(baseW, maxW));
+    }
+
+    // dibujar
+    if (hasLayered) {
+      window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
       return;
     }
-
-    // Fallback single PNG
-    if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
 
     const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
     const targetH = targetW * aspect;
