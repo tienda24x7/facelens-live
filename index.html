@@ -94,6 +94,7 @@ let lentesFiltrados = [];
 let currentIndex = 0;
 
 let lensImg = null;
+let lensImgReady = false;
 
 /* =========================
    4) CARGA CONFIG (cliente + lentes por plan)
@@ -519,8 +520,6 @@ async function loadLensAssets(lens) {
    ✅ NUEVO: variables globales para el render (compatibles con lo actual)
 ========================= */
 let lensAssets = null;      // {type:'single'|'two'|'four', ...}
-let lensImgReady = false;   // ya existía en tu proyecto; la mantenemos
-let lensImg = null;         // mantenemos para compatibilidad (single)
 
 /* =========================
    ✅ IMPORTANTE:
