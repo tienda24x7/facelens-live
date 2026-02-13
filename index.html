@@ -721,6 +721,7 @@ function startAR() {
   }
 
   faceMesh.onResults((results) => {
+  try {
     if (!video.videoWidth || !video.videoHeight) return;
 
     canvas.width = video.videoWidth;
@@ -770,7 +771,8 @@ function startAR() {
       smoothY = targetY;
       smoothA = angle;
       smoothD = eyeDistPx;
-      smoothW = null; // se inicializa luego
+      smoothW = null;     // ancho final suavizado
+      smoothS = null;     // ratio móvil suavizado
     } else {
       smoothX = lerp(smoothX, targetX, P.Tpos);
       smoothY = lerp(smoothY, targetY, P.Tpos);
@@ -781,73 +783,71 @@ function startAR() {
       smoothD = lerp(smoothD, eyeDistPx, P.Td);
     }
 
-    // ==============
-    // Zoom robusto
-    // ==============
+    // =========================
+    // ✅ CÁLCULO ÚNICO DE targetW
+    // =========================
+    let desiredW;
 
-    // baseW proporcional a eyeDist (esto hace que al alejar/acercar CAMBIE sí o sí)
-    let baseW = smoothD * P.baseFactor * scale;
+    if (mobile) {
+      // ✅ MÓVIL: tamaño responde a la distancia usando 2 señales simples:
+      // - eyeNorm: ojos más grandes en pantalla cuando te acercás
+      // - faceNorm: cara más grande cuando te acercás (más estable)
+      const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
 
-    // freno progresivo cuando estás MUY cerca (reduce baseW)
-    // usamos ratio respecto del ancho del canvas para que sea estable
-    const dRatio = smoothD / Math.max(1, canvas.width);
-    const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
-    const tNear = Math.max(0, Math.min(1, tNearRaw));
-    const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
-    const brake = 1 - tNearSmooth * (1 - P.nearBrake);
-    baseW *= brake;
+      const top = lm[10]  ? (lm[10].y  * canvas.height) : 0;   // frente
+      const bot = lm[152] ? (lm[152].y * canvas.height) : 0;   // mentón
+      const faceH = Math.max(0, bot - top);
+      const faceNorm = faceH / Math.max(1, canvas.height);
 
-    // límites (suaves)
-    let minW, maxW;
-  if (mobile) {
-  // ✅ MÓVIL: tamaño responde a la distancia (se acerca/aleja) SIN congelarse
-  // Idea simple:
-  // - "eyeNorm" sube cuando te acercás (ojos se ven más grandes en pantalla)
-  // - usamos eso como base, y le damos un empujón extra con "cara grande vs canvas"
+      // Ajustes:
+      const kEye  = 4.6;
+      const kFace = 0.9;
 
-  const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
+      let ratio = (kEye * eyeNorm + kFace * faceNorm) * scale;
 
-  // Medida extra de "cara cerca": distancia mentón-frente aprox (más estable)
-  // (si algún punto no existe, cae a 0 y no rompe)
-  const top = lm[10]  ? (lm[10].y  * canvas.height) : 0;   // frente
-  const bot = lm[152] ? (lm[152].y * canvas.height) : 0;   // mentón
-  const faceH = Math.max(0, bot - top);
-  const faceNorm = faceH / Math.max(1, canvas.height); // cara grande = más cerca
+      // límites de ratio para que no explote ni desaparezca
+      ratio = Math.max(0.035, Math.min(0.90, ratio));
 
-  // Ajustes (los podés tocar después):
-  // kEye = tamaño base
-  // kFace = cuánto influye "cara cerca"
-  const kEye  = 4.6;   // 🔥 sube/baja tamaño general en móvil
-  const kFace = 0.9;   // 🔥 sube/baja cuánto cambia al acercar/alejar
+      // suavizado ratio (más rápido en móvil)
+      smoothS = (smoothS === null) ? ratio : lerp(smoothS, ratio, P.Tsize);
 
-  let desiredRatio = (kEye * eyeNorm + kFace * faceNorm) * scale;
+      const maxW = canvas.width * P.maxWRatio;
+      const minW = canvas.width * 0.035;
 
-  // Dejamos que achique MUCHO al alejarse
-  const clampMin = 0.035;
-  const clampMax = 0.90;
-  desiredRatio = Math.max(clampMin, Math.min(clampMax, desiredRatio));
+      desiredW = canvas.width * smoothS;
 
-  // Suavizado: responde rápido pero sin temblar
-  smoothS = (smoothS === null) ? desiredRatio : lerp(smoothS, desiredRatio, P.Tsize);
+      // clamp final
+      desiredW = Math.max(minW, Math.min(desiredW, maxW));
 
-  // Límites finales por ancho del canvas
-  const maxW = canvas.width * P.maxWRatio;
+    } else {
+      // ✅ DESKTOP: tu lógica original (no tocar)
+      let baseW = smoothD * P.baseFactor * scale;
 
-  // ✅ piso muy bajo para que realmente achique cuando te alejás
-  const minW = canvas.width * 0.035;
+      // freno progresivo cuando estás MUY cerca (reduce baseW)
+      const dRatio = smoothD / Math.max(1, canvas.width);
+      const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
+      const tNear = Math.max(0, Math.min(1, tNearRaw));
+      const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
+      const brake = 1 - tNearSmooth * (1 - P.nearBrake);
+      baseW *= brake;
 
-  const baseW = canvas.width * smoothS;
-  targetW = Math.max(minW, Math.min(baseW, maxW));
+      const minW = P.minWpx;
+      const maxW = canvas.width * P.maxWRatio;
 
-} else {
-  // ✅ DESKTOP: NO TOCAR
-  const baseW = smoothD * P.baseFactor * scale;
-  const maxW = canvas.width * P.maxWRatio;
-  const minW = P.minWpx;
-  targetW = Math.max(minW, Math.min(baseW, maxW));
-}
+      desiredW = Math.max(minW, Math.min(baseW, maxW));
+    }
 
+    // =========================
+    // ✅ suavizado final del ancho (anti-temblor)
+    // =========================
+    if (smoothW === null) smoothW = desiredW;
+    else smoothW = lerp(smoothW, desiredW, P.Tw);
+
+    const targetW = smoothW;
+
+    // =========================
     // dibujar (capas o single)
+    // =========================
     if (hasLayered) {
       window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
       return;
@@ -861,7 +861,18 @@ function startAR() {
     ctx.rotate(smoothA);
     ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
     ctx.restore();
-  });
+
+  } catch (err) {
+    // ✅ AIRBAG: si algo falla en móvil, NO se congela el video
+    console.warn("AR error (no congela):", err);
+    try {
+      if (results?.image) {
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(results.image, 0,0,canvas.width,canvas.height);
+      }
+    } catch(e) {}
+  }
+});
 
   const camera = new Camera(video, {
     onFrame: async () => { await faceMesh.send({ image: video }); },
