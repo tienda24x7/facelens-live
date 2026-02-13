@@ -799,10 +799,31 @@ function startAR() {
 
     // límites (suaves)
     let minW, maxW;
-   if (mobile) {
-  // ✅ En móvil, dejamos achicar más (si no, queda “grande fijo” cuando te alejás)
-  minW = canvas.width * (P.minWRatio * 0.35);  // antes: canvas.width * P.minWRatio
-  maxW = canvas.width * P.maxWRatio;
+  if (mobile) {
+  // ✅ MÓVIL: tamaño por "altura de cara" (frente ↔ mentón)
+  // Esto responde MUCHO mejor al acercar/alejar en celulares.
+
+  // puntos FaceMesh: 10 = frente, 152 = mentón
+  const forehead = lm[10];
+  const chin = lm[152];
+
+  const fx = forehead.x * canvas.width;
+  const fy = forehead.y * canvas.height;
+  const cx = chin.x * canvas.width;
+  const cy = chin.y * canvas.height;
+
+  const faceH = Math.hypot(cx - fx, cy - fy); // altura de cara en px
+
+  // Factor móvil (ajusta el tamaño general solo en móvil)
+  // Si lo querés un 10% más grande: subí 0.90 → 0.99 aprox.
+  const mobileFactor = (P.mobileFaceFactor ?? 0.92);
+
+  // Base por cara (NO por ojos)
+  baseW = faceH * mobileFactor * scale;
+
+  // límites (móvil)
+  minW = canvas.width * 0.10;        // mínimo razonable
+  maxW = canvas.width * P.maxWRatio; // tu máximo actual
 } else {
   // ✅ Desktop: igual que ahora (NO tocar)
   minW = P.minWpx;
@@ -818,13 +839,14 @@ if (smoothW === null) {
 } else {
   const TwFinal =
     (mobile && desiredW < smoothW)
-      ? Math.min(0.55, P.Tw * 2.2)  // baja más rápido cuando hay que achicar
-      : P.Tw;                       // normal en el resto
+      ? Math.min(0.55, P.Tw * 2.2)
+      : P.Tw;
 
   smoothW = lerp(smoothW, desiredW, TwFinal);
 }
 
 const targetW = smoothW;
+
 
     // dibujar (capas o single)
     if (hasLayered) {
