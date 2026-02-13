@@ -800,53 +800,48 @@ function startAR() {
     // límites (suaves)
     let minW, maxW;
   if (mobile) {
-  // ✅ MÓVIL: tamaño por "altura de cara" (frente ↔ mentón)
-  // Esto responde MUCHO mejor al acercar/alejar en celulares.
+  // ✅ MÓVIL: zoom por "tamaño + profundidad" (perspectiva real)
+  // - eyeNorm = tamaño en pantalla
+  // - zNorm   = cuánto "se acerca" la cara (profundidad)
+  const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
 
-  // puntos FaceMesh: 10 = frente, 152 = mentón
-  const forehead = lm[10];
-  const chin = lm[152];
+  // Profundidad (z): cuando se acerca, suele aumentar el "valor absoluto"
+  // Tomamos nariz/centro para estabilidad
+  const z = lm[168]?.z ?? 0;
+  const zAbs = Math.abs(z);
 
-  const fx = forehead.x * canvas.width;
-  const fy = forehead.y * canvas.height;
-  const cx = chin.x * canvas.width;
-  const cy = chin.y * canvas.height;
+  // Normalizamos z a un rango manejable (valores típicos: ~0.01 a 0.20)
+  // Ajustá zGain si querés más/menos reacción al acercar/alejar
+  const zGain = 2.8;     // 🔥 más alto = más responde a la distancia
+  const zNorm = Math.min(0.30, zAbs) * zGain; // clamp suave
 
-  const faceH = Math.hypot(cx - fx, cy - fy); // altura de cara en px
+  // Mezcla: tamaño base + extra por profundidad
+  // Ajustá kEye para cambiar el tamaño general en móvil
+  const kEye = 4.2;      // tamaño base por "ancho de ojos"
+  const kZ   = 1.0;      // cuánto influye la profundidad
+  let desiredRatio = (kEye * eyeNorm + kZ * zNorm) * scale;
 
-  // Factor móvil (ajusta el tamaño general solo en móvil)
-  // Si lo querés un 10% más grande: subí 0.90 → 0.99 aprox.
-  const mobileFactor = (P.mobileFaceFactor ?? 0.92);
+  // Dejamos que achique bastante (clave para que no quede "grande fijo")
+  const clampMin = 0.05;
+  const clampMax = 0.90;
+  desiredRatio = Math.max(clampMin, Math.min(clampMax, desiredRatio));
 
-  // Base por cara (NO por ojos)
-  baseW = faceH * mobileFactor * scale;
+  // Suavizado de zoom
+  smoothS = (smoothS === null) ? desiredRatio : lerp(smoothS, desiredRatio, P.Tsize);
 
-  // límites (móvil)
-  minW = canvas.width * 0.10;        // mínimo razonable
-  maxW = canvas.width * P.maxWRatio; // tu máximo actual
+  // Límites finales por ancho del canvas
+  const maxW = canvas.width * P.maxWRatio;
+  const minW = canvas.width * 0.05; // ✅ mínimo muy bajo para que realmente achique
+
+  const baseW = canvas.width * smoothS;
+  targetW = Math.max(minW, Math.min(baseW, maxW));
 } else {
-  // ✅ Desktop: igual que ahora (NO tocar)
-  minW = P.minWpx;
-  maxW = canvas.width * P.maxWRatio;
+  // ✅ DESKTOP: NO TOCAR
+  const baseW = smoothD * P.baseFactor * scale;
+  const maxW = canvas.width * P.maxWRatio;
+  const minW = P.minWpx;
+  targetW = Math.max(minW, Math.min(baseW, maxW));
 }
-
-const desiredW = softClamp(baseW, minW, maxW);
-
-// ✅ suavizado final del ancho:
-// - si está bajando (achicando) en móvil, lo hacemos más rápido
-if (smoothW === null) {
-  smoothW = desiredW;
-} else {
-  const TwFinal =
-    (mobile && desiredW < smoothW)
-      ? Math.min(0.55, P.Tw * 2.2)
-      : P.Tw;
-
-  smoothW = lerp(smoothW, desiredW, TwFinal);
-}
-
-const targetW = smoothW;
-
 
     // dibujar (capas o single)
     if (hasLayered) {
