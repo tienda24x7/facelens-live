@@ -629,7 +629,7 @@ nextBtn.onclick = () => {
 };
 
 /* =========================
-   7) AR (FaceMesh + suavizado + zoom OK en móvil sin romper PC)
+   7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
 function startAR() {
   const faceMesh = new FaceMesh({
@@ -645,8 +645,8 @@ function startAR() {
   });
 
   let smoothX = null, smoothY = null, smoothA = null;
-  let smoothD = null; // distancia ojos suavizada (px) para desktop
-  let smoothS = null; // ratio suavizado (solo móvil)
+  let smoothD = null;   // eyeDist suavizado (px)
+  let smoothW = null;   // ancho final suavizado (px)
   const lerp = (a,b,t)=>a+(b-a)*t;
   const normAngle = (a)=>Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -670,30 +670,53 @@ function startAR() {
     return Number.isFinite(v) && v > 0 ? v : getLensScaleDefault();
   }
 
-  // Params por dispositivo (NO iguales)
+  // Soft-clamp (suaviza límites, no “plancha” en seco)
+  function softClamp(x, lo, hi) {
+    if (x <= lo) return lo;
+    if (x >= hi) return hi;
+    const t = (x - lo) / (hi - lo);         // 0..1
+    const s = t * t * (3 - 2 * t);          // smoothstep
+    return lo + (hi - lo) * s;
+  }
+
+  // Params por dispositivo
   function getParams() {
     if (isMobileDevice()) {
       return {
+        // Pose smoothing
         Tpos: 0.18,
-        Tsize: 0.32,     // zoom móvil responde más rápido
-        maxWRatio: 0.62, // permite crecer
-        minWRatio: 0.06, // ✅ CLAVE: deja achicar MUCHO al alejarse
-        // mapeo de eyeNorm -> ratioW:
-        // lejos (eyeNorm ~0.08-0.11) => ratio pequeño
-        // cerca (eyeNorm ~0.16-0.22) => ratio grande
-        k: 3.9,
-        b: 0.00,
-        clampMin: 0.06,  // ✅ CLAVE: mínimo bajo (antes te lo planchaba)
-        clampMax: 0.85
+        // Dist smoothing (más lento = menos saltos en móvil)
+        Td: 0.14,
+        // Zoom smoothing (más rápido = responde al acercar/alejar)
+        Tw: 0.22,
+
+        // Tamaño base (antes usabas mapeo k*eyeNorm; ahora usamos eyeDist * factor)
+        baseFactor: 2.05,
+
+        // Límites (suaves) relativos al canvas
+        minWRatio: 0.08,   // si lo dejás muy alto, “se plancha” cuando te alejás
+        maxWRatio: 0.52,   // techo para que no tape toda la cara
+
+        // Freno progresivo cuando estás MUY cerca (evita que explote)
+        nearStart: 0.22,   // eyeDist/canvasW donde empieza a frenar
+        nearEnd:   0.34,   // donde el freno ya está completo
+        nearBrake: 0.70    // multiplicador final en extremo cerca (reduce tamaño)
       };
     }
-    // Desktop: volvemos a lo que ya te había quedado bien
+
+    // Desktop: mantiene lo que venía funcionando, pero con freno de “muy cerca”
     return {
       Tpos: 0.18,
-      Tsize: 0.18,
+      Td: 0.16,
+      Tw: 0.18,
+
       baseFactor: 1.85,
-      maxWRatio: 0.26,
-      minWpx: 110
+      minWpx: 110,
+      maxWRatio: 0.30,
+
+      nearStart: 0.18,
+      nearEnd:   0.28,
+      nearBrake: 0.78
     };
   }
 
@@ -712,7 +735,6 @@ function startAR() {
     // Si tenés renderer por capas, lo usa. Si no, fallback a lensImg.
     const hasLayered = (typeof window.__drawARLayered === "function");
 
-    // Fallback single PNG
     if (!hasLayered) {
       if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
     }
@@ -738,17 +760,17 @@ function startAR() {
     const targetX = nx;
     const targetY = ny + eyeDistPx * 0.06;
 
-    const scale = getLensScale();
     const mobile = isMobileDevice();
     const P = getParams();
+    const scale = getLensScale();
 
-    // suavizado pose
+    // suavizado pose + distancia
     if (smoothX === null) {
       smoothX = targetX;
       smoothY = targetY;
       smoothA = angle;
       smoothD = eyeDistPx;
-      smoothS = (eyeDistPx / Math.max(1, canvas.width)); // init
+      smoothW = null; // se inicializa luego
     } else {
       smoothX = lerp(smoothX, targetX, P.Tpos);
       smoothY = lerp(smoothY, targetY, P.Tpos);
@@ -756,38 +778,44 @@ function startAR() {
       const da = normAngle(angle - smoothA);
       smoothA = normAngle(smoothA + da * P.Tpos);
 
-      smoothD = lerp(smoothD, eyeDistPx, P.Tpos);
+      smoothD = lerp(smoothD, eyeDistPx, P.Td);
     }
 
-    let targetW;
+    // ==============
+    // Zoom robusto
+    // ==============
 
+    // baseW proporcional a eyeDist (esto hace que al alejar/acercar CAMBIE sí o sí)
+    let baseW = smoothD * P.baseFactor * scale;
+
+    // freno progresivo cuando estás MUY cerca (reduce baseW)
+    // usamos ratio respecto del ancho del canvas para que sea estable
+    const dRatio = smoothD / Math.max(1, canvas.width);
+    const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
+    const tNear = Math.max(0, Math.min(1, tNearRaw));
+    const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
+    const brake = 1 - tNearSmooth * (1 - P.nearBrake);
+    baseW *= brake;
+
+    // límites (suaves)
+    let minW, maxW;
     if (mobile) {
-      // ✅ MÓVIL: usamos eyeNorm para que NO dependa de cómo escala el video en pantalla
-      const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
-
-      // ratio deseado (sin planchar)
-      let desiredRatio = (P.k * eyeNorm + P.b) * scale;
-      desiredRatio = Math.max(P.clampMin, Math.min(P.clampMax, desiredRatio));
-
-      // suavizado de zoom
-      smoothS = (smoothS === null) ? desiredRatio : lerp(smoothS, desiredRatio, P.Tsize);
-
-      const maxW = canvas.width * P.maxWRatio;
-      const minW = canvas.width * P.minWRatio;
-
-      const baseW = canvas.width * smoothS;
-      targetW = Math.max(minW, Math.min(baseW, maxW));
-
+      minW = canvas.width * P.minWRatio;
+      maxW = canvas.width * P.maxWRatio;
     } else {
-      // ✅ DESKTOP: volvemos al método anterior (te estaba funcionando bien)
-      const baseW = smoothD * P.baseFactor * scale;
-      const maxW = canvas.width * P.maxWRatio;
-      const minW = P.minWpx;
-
-      targetW = Math.max(minW, Math.min(baseW, maxW));
+      minW = P.minWpx;
+      maxW = canvas.width * P.maxWRatio;
     }
 
-    // dibujar
+    const desiredW = softClamp(baseW, minW, maxW);
+
+    // suavizado final del ancho (para que no tiemble y responda bien)
+    if (smoothW === null) smoothW = desiredW;
+    else smoothW = lerp(smoothW, desiredW, P.Tw);
+
+    const targetW = smoothW;
+
+    // dibujar (capas o single)
     if (hasLayered) {
       window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
       return;
@@ -811,6 +839,7 @@ function startAR() {
 
   camera.start();
 }
+
 /* =========================
      INIT
   ========================= */
