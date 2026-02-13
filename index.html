@@ -800,41 +800,45 @@ function startAR() {
     // límites (suaves)
     let minW, maxW;
   if (mobile) {
-  // ✅ MÓVIL: zoom por "tamaño + profundidad" (perspectiva real)
-  // - eyeNorm = tamaño en pantalla
-  // - zNorm   = cuánto "se acerca" la cara (profundidad)
+  // ✅ MÓVIL: tamaño responde a la distancia (se acerca/aleja) SIN congelarse
+  // Idea simple:
+  // - "eyeNorm" sube cuando te acercás (ojos se ven más grandes en pantalla)
+  // - usamos eso como base, y le damos un empujón extra con "cara grande vs canvas"
+
   const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
 
-  // Profundidad (z): cuando se acerca, suele aumentar el "valor absoluto"
-  // Tomamos nariz/centro para estabilidad
-  const z = lm[168]?.z ?? 0;
-  const zAbs = Math.abs(z);
+  // Medida extra de "cara cerca": distancia mentón-frente aprox (más estable)
+  // (si algún punto no existe, cae a 0 y no rompe)
+  const top = lm[10]  ? (lm[10].y  * canvas.height) : 0;   // frente
+  const bot = lm[152] ? (lm[152].y * canvas.height) : 0;   // mentón
+  const faceH = Math.max(0, bot - top);
+  const faceNorm = faceH / Math.max(1, canvas.height); // cara grande = más cerca
 
-  // Normalizamos z a un rango manejable (valores típicos: ~0.01 a 0.20)
-  // Ajustá zGain si querés más/menos reacción al acercar/alejar
-  const zGain = 2.8;     // 🔥 más alto = más responde a la distancia
-  const zNorm = Math.min(0.30, zAbs) * zGain; // clamp suave
+  // Ajustes (los podés tocar después):
+  // kEye = tamaño base
+  // kFace = cuánto influye "cara cerca"
+  const kEye  = 4.6;   // 🔥 sube/baja tamaño general en móvil
+  const kFace = 0.9;   // 🔥 sube/baja cuánto cambia al acercar/alejar
 
-  // Mezcla: tamaño base + extra por profundidad
-  // Ajustá kEye para cambiar el tamaño general en móvil
-  const kEye = 4.2;      // tamaño base por "ancho de ojos"
-  const kZ   = 1.0;      // cuánto influye la profundidad
-  let desiredRatio = (kEye * eyeNorm + kZ * zNorm) * scale;
+  let desiredRatio = (kEye * eyeNorm + kFace * faceNorm) * scale;
 
-  // Dejamos que achique bastante (clave para que no quede "grande fijo")
-  const clampMin = 0.05;
+  // Dejamos que achique MUCHO al alejarse
+  const clampMin = 0.035;
   const clampMax = 0.90;
   desiredRatio = Math.max(clampMin, Math.min(clampMax, desiredRatio));
 
-  // Suavizado de zoom
+  // Suavizado: responde rápido pero sin temblar
   smoothS = (smoothS === null) ? desiredRatio : lerp(smoothS, desiredRatio, P.Tsize);
 
   // Límites finales por ancho del canvas
   const maxW = canvas.width * P.maxWRatio;
-  const minW = canvas.width * 0.05; // ✅ mínimo muy bajo para que realmente achique
+
+  // ✅ piso muy bajo para que realmente achique cuando te alejás
+  const minW = canvas.width * 0.035;
 
   const baseW = canvas.width * smoothS;
   targetW = Math.max(minW, Math.min(baseW, maxW));
+
 } else {
   // ✅ DESKTOP: NO TOCAR
   const baseW = smoothD * P.baseFactor * scale;
