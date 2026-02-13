@@ -799,21 +799,32 @@ function startAR() {
 
     // límites (suaves)
     let minW, maxW;
-    if (mobile) {
-      minW = canvas.width * P.minWRatio;
-      maxW = canvas.width * P.maxWRatio;
-    } else {
-      minW = P.minWpx;
-      maxW = canvas.width * P.maxWRatio;
-    }
+   if (mobile) {
+  // ✅ En móvil, dejamos achicar más (si no, queda “grande fijo” cuando te alejás)
+  minW = canvas.width * (P.minWRatio * 0.35);  // antes: canvas.width * P.minWRatio
+  maxW = canvas.width * P.maxWRatio;
+} else {
+  // ✅ Desktop: igual que ahora (NO tocar)
+  minW = P.minWpx;
+  maxW = canvas.width * P.maxWRatio;
+}
 
-    const desiredW = softClamp(baseW, minW, maxW);
+const desiredW = softClamp(baseW, minW, maxW);
 
-    // suavizado final del ancho (para que no tiemble y responda bien)
-    if (smoothW === null) smoothW = desiredW;
-    else smoothW = lerp(smoothW, desiredW, P.Tw);
+// ✅ suavizado final del ancho:
+// - si está bajando (achicando) en móvil, lo hacemos más rápido
+if (smoothW === null) {
+  smoothW = desiredW;
+} else {
+  const TwFinal =
+    (mobile && desiredW < smoothW)
+      ? Math.min(0.55, P.Tw * 2.2)  // baja más rápido cuando hay que achicar
+      : P.Tw;                       // normal en el resto
 
-    const targetW = smoothW;
+  smoothW = lerp(smoothW, desiredW, TwFinal);
+}
+
+const targetW = smoothW;
 
     // dibujar (capas o single)
     if (hasLayered) {
