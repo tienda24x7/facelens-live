@@ -720,7 +720,7 @@ function startAR() {
     };
   }
 
-  faceMesh.onResults((results) => {
+faceMesh.onResults((results) => {
   try {
     if (!video.videoWidth || !video.videoHeight) return;
 
@@ -733,12 +733,29 @@ function startAR() {
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
 
-    // Si tenés renderer por capas, lo usa. Si no, fallback a lensImg.
+    // Si tenés renderer por capas, lo usa (PERO solo si assets listos).
     const hasLayered = (typeof window.__drawARLayered === "function");
 
-    if (!hasLayered) {
-      if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
-    }
+    // ✅ Detectar si realmente hay assets listos (capas)
+    // - usamos lensAssets global si existe; si no, probamos window.lensAssets (por compatibilidad)
+    const assetsRef =
+      (typeof lensAssets !== "undefined" && lensAssets) ? lensAssets :
+      (window.lensAssets || null);
+
+    const layeredReady =
+      hasLayered &&
+      !!assetsRef &&
+      (
+        (assetsRef.type === "two"  && assetsRef.frame && assetsRef.lens) ||
+        (assetsRef.type === "four" && assetsRef.frame && assetsRef.lens) ||
+        (assetsRef.type === "single" && assetsRef.single)
+      );
+
+    // ✅ Detectar si hay PNG único listo
+    const singleReady = !!(lensImgReady && lensImg && lensImg.naturalWidth > 0);
+
+    // ✅ Si no hay nada listo, NO dibujamos lente, pero el video sigue
+    const canDraw = layeredReady || singleReady;
 
     const lm = faces[0];
     const L = lm[33];
@@ -846,21 +863,22 @@ function startAR() {
     const targetW = smoothW;
 
     // =========================
-    // dibujar (capas o single)
+    // ✅ dibujar (capas o single) SOLO si hay assets listos
     // =========================
-    if (hasLayered) {
-      window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
-      return;
+    if (canDraw) {
+      if (layeredReady) {
+        window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
+      } else if (singleReady) {
+        const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+        const targetH = targetW * aspect;
+
+        ctx.save();
+        ctx.translate(smoothX, smoothY);
+        ctx.rotate(smoothA);
+        ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
+        ctx.restore();
+      }
     }
-
-    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
-    const targetH = targetW * aspect;
-
-    ctx.save();
-    ctx.translate(smoothX, smoothY);
-    ctx.rotate(smoothA);
-    ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
-    ctx.restore();
 
   } catch (err) {
     // ✅ AIRBAG: si algo falla en móvil, NO se congela el video
