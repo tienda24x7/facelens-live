@@ -458,18 +458,44 @@ function buildPathsForSku(folder, sku) {
   };
 }
 
-// Carga imagen sin romper nada
+// ✅ Detecto móvil “simple”
+function isMobileForAssets() {
+  return (
+    (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  );
+}
+
+// ✅ Carga imagen sin romper nada (fix móvil: NO crossOrigin + decode)
 function loadImageSafe(url) {
   return new Promise((resolve) => {
     if (!url) return resolve(null);
 
-    const u = String(url).trim(); // ✅ no “reemplazamos espacios” acá; ya codificamos el path arriba
+    const u = String(url).trim();
 
     const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
+
+    // ✅ PC: mantenemos crossOrigin como antes
+    // ✅ Móvil: NO seteamos crossOrigin (Safari/Chrome móvil suelen fallar si lo ponés)
+    if (!isMobileForAssets()) {
+      img.crossOrigin = "anonymous";
+    }
+
+    img.onload = async () => {
+      // ✅ Safari: a veces “carga” pero no dibuja bien si no decodificás
+      try {
+        if (img.decode) await img.decode();
+      } catch (e) {
+        // si decode falla, igual seguimos
+      }
+      resolve(img);
+    };
+
     img.onerror = () => resolve(null);
-    img.src = u;
+
+    // ✅ (Opcional) Si querés reventar cache en móvil: window.__ASSET_VER__ = String(Date.now())
+    const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
+    img.src = ver ? (u + (u.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(ver)) : u;
   });
 }
 
