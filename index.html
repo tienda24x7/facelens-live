@@ -727,35 +727,14 @@ faceMesh.onResults((results) => {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(results.image, 0,0,canvas.width,canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
 
-    // Si tenés renderer por capas, lo usa (PERO solo si assets listos).
+    // Si tenés renderer por capas
     const hasLayered = (typeof window.__drawARLayered === "function");
-
-    // ✅ Detectar si realmente hay assets listos (capas)
-    // - usamos lensAssets global si existe; si no, probamos window.lensAssets (por compatibilidad)
-    const assetsRef =
-      (typeof lensAssets !== "undefined" && lensAssets) ? lensAssets :
-      (window.lensAssets || null);
-
-    const layeredReady =
-      hasLayered &&
-      !!assetsRef &&
-      (
-        (assetsRef.type === "two"  && assetsRef.frame && assetsRef.lens) ||
-        (assetsRef.type === "four" && assetsRef.frame && assetsRef.lens) ||
-        (assetsRef.type === "single" && assetsRef.single)
-      );
-
-    // ✅ Detectar si hay PNG único listo
-    const singleReady = !!(lensImgReady && lensImg && lensImg.naturalWidth > 0);
-
-    // ✅ Si no hay nada listo, NO dibujamos lente, pero el video sigue
-    const canDraw = layeredReady || singleReady;
 
     const lm = faces[0];
     const L = lm[33];
@@ -788,8 +767,8 @@ faceMesh.onResults((results) => {
       smoothY = targetY;
       smoothA = angle;
       smoothD = eyeDistPx;
-      smoothW = null;     // ancho final suavizado
-      smoothS = null;     // ratio móvil suavizado
+      smoothW = null; // ancho final suavizado
+      smoothS = null; // ratio móvil suavizado
     } else {
       smoothX = lerp(smoothX, targetX, P.Tpos);
       smoothY = lerp(smoothY, targetY, P.Tpos);
@@ -801,14 +780,12 @@ faceMesh.onResults((results) => {
     }
 
     // =========================
-    // ✅ CÁLCULO ÚNICO DE targetW
+    // ✅ CÁLCULO ÚNICO DE desiredW
     // =========================
     let desiredW;
 
     if (mobile) {
-      // ✅ MÓVIL: tamaño responde a la distancia usando 2 señales simples:
-      // - eyeNorm: ojos más grandes en pantalla cuando te acercás
-      // - faceNorm: cara más grande cuando te acercás (más estable)
+      // ✅ MÓVIL: responde a la distancia con 2 señales simples:
       const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
 
       const top = lm[10]  ? (lm[10].y  * canvas.height) : 0;   // frente
@@ -816,13 +793,13 @@ faceMesh.onResults((results) => {
       const faceH = Math.max(0, bot - top);
       const faceNorm = faceH / Math.max(1, canvas.height);
 
-      // Ajustes:
+      // Ajustes (solo móvil)
       const kEye  = 4.6;
       const kFace = 0.9;
 
       let ratio = (kEye * eyeNorm + kFace * faceNorm) * scale;
 
-      // límites de ratio para que no explote ni desaparezca
+      // límites de ratio
       ratio = Math.max(0.035, Math.min(0.90, ratio));
 
       // suavizado ratio (más rápido en móvil)
@@ -832,15 +809,13 @@ faceMesh.onResults((results) => {
       const minW = canvas.width * 0.035;
 
       desiredW = canvas.width * smoothS;
-
-      // clamp final
       desiredW = Math.max(minW, Math.min(desiredW, maxW));
 
     } else {
       // ✅ DESKTOP: tu lógica original (no tocar)
       let baseW = smoothD * P.baseFactor * scale;
 
-      // freno progresivo cuando estás MUY cerca (reduce baseW)
+      // freno progresivo cuando estás MUY cerca
       const dRatio = smoothD / Math.max(1, canvas.width);
       const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
       const tNear = Math.max(0, Math.min(1, tNearRaw));
@@ -863,34 +838,60 @@ faceMesh.onResults((results) => {
     const targetW = smoothW;
 
     // =========================
-    // ✅ dibujar (capas o single) SOLO si hay assets listos
+    // ✅ DIBUJO: capas con fallback a PNG simple
     // =========================
-    if (canDraw) {
-      if (layeredReady) {
-        window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
-      } else if (singleReady) {
-        const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
-        const targetH = targetW * aspect;
 
-        ctx.save();
-        ctx.translate(smoothX, smoothY);
-        ctx.rotate(smoothA);
-        ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
-        ctx.restore();
+    // helper: dibujar PNG simple (solo si existe)
+    function drawSingle() {
+      if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return false;
+
+      const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+      const targetH = targetW * aspect;
+
+      ctx.save();
+      ctx.translate(smoothX, smoothY);
+      ctx.rotate(smoothA);
+      ctx.drawImage(lensImg, -targetW / 2, -targetH / 2, targetW, targetH);
+      ctx.restore();
+      return true;
+    }
+
+    let drawn = false;
+
+    // 1) Intentar capas si existe y si hay assets listos
+    if (hasLayered && lensImgReady) {
+      try {
+        // Si tu __drawARLayered devuelve true/false, lo respetamos.
+        const res = window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
+        drawn = (res !== false); // si devuelve false explícito, consideramos que no dibujó
+      } catch (e) {
+        console.warn("⚠️ __drawARLayered falló, hago fallback a PNG:", e);
+        drawn = false;
+      }
+    }
+
+    // 2) Fallback: PNG simple
+    if (!drawn) {
+      const ok = drawSingle();
+      if (!ok) {
+        // si no hay ni capas ni PNG, al menos no rompemos el video
+        // (y queda log para debug)
+        // console.log("No hay assets listos todavía (lensImgReady=false).");
       }
     }
 
   } catch (err) {
-    // ✅ AIRBAG: si algo falla en móvil, NO se congela el video
+    // ✅ AIRBAG: si algo falla, NO se congela el video
     console.warn("AR error (no congela):", err);
     try {
       if (results?.image) {
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.drawImage(results.image, 0,0,canvas.width,canvas.height);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
       }
-    } catch(e) {}
+    } catch (e) {}
   }
 });
+
 
   const camera = new Camera(video, {
     onFrame: async () => { await faceMesh.send({ image: video }); },
