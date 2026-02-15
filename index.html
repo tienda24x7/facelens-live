@@ -364,8 +364,6 @@ function getClientWhatsApp() {
 
 function getClientDefaultUrl() {
   const c = window.__client || {};
-
-  // Prioridad de URL a nivel cliente (por si cambia el nombre de columna)
   return pickFirstUrlFromCandidates([
     c.default_url,
     c.defaultUrl,
@@ -382,25 +380,24 @@ function getClientDefaultUrl() {
 }
 
 /* =========================
-   ✅ NUEVO: helpers para armar URLs de Storage por SKU
+   ✅ helpers para URLs Storage por SKU
 ========================= */
 
-// 1) Base del proyecto Supabase (ya la tenés hardcodeada en tus imagen_url actuales)
+// Base Supabase
 const SUPABASE_PROJECT_URL = "https://romgbrobvperljaviekj.supabase.co";
-
-// 2) Bucket público donde subís
 const STORAGE_BUCKET = "facelens-assets";
 
-// 3) Carpeta de lentes dentro del bucket (según tu estructura actual)
-function getLensFolderForClient() {
+// Folder principal por cliente (slug)
+function getLensFolderForClientPrimary() {
   const c = window.__client || {};
   const s = String(c.slug || "").trim();
   return s || "default";
 }
 
-function buildPublicStorageUrl(pathInBucket) {
-  const clean = String(pathInBucket || "").replace(/^\/+/, "");
-  return `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
+// Folder fallback (si no existe en slug)
+function getLensFolderFallback() {
+  // Podés cambiar "global" por el que estés usando
+  return "global";
 }
 
 // Normaliza SKU tipo "100101", "SKU_100101", "100101 app" -> "100101"
@@ -412,133 +409,140 @@ function normalizeSku(sku) {
   return m ? m[1] : cleaned;
 }
 
-// Candidatos de assets por SKU (4PNG -> 2PNG -> 1PNG)
-function getAssetCandidatesForLens(lens) {
-  const skuRaw = lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "";
-  const sku = normalizeSku(skuRaw);
+// ✅ arma URL pública y la deja “segura” (evita 400 por caracteres raros)
+function buildPublicStorageUrl(pathInBucket) {
+  const clean = String(pathInBucket || "").replace(/^\/+/, "");
+  const full = `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
+  // encodeURI respeta : / ? & = y encodea espacios y cosas raras
+  return encodeURI(full);
+}
 
-  const folder = getLensFolderForClient(); // ej tienda24x7_demo
+// candidatos de paths para un SKU dentro de un folder
+function buildPathsForSku(folder, sku) {
   const basePath = `lentes/${folder}/`;
 
-  // fallback final a imagen_url DB (si viene link directo)
-  const dbImg = String(lens?.imagen_url || "").trim();
-
-  // Si no hay SKU, solo podemos caer al imagen_url que venga en DB
-  if (!sku) {
-    return {
-      mode: "no_sku",
-      dbImg
-    };
-  }
-
-  const one = buildPublicStorageUrl(`${basePath}${sku}.png`);
-
-  const frame = buildPublicStorageUrl(`${basePath}${sku}_frame.png`);
-  const lensPng = buildPublicStorageUrl(`${basePath}${sku}_lens.png`);
-
-  // Patillas (opcionales). Usamos nombres “estándar” y algunos aliases por si cambian
-  const leftTemple = buildPublicStorageUrl(`${basePath}${sku}_left_temple.png`);
-  const rightTemple = buildPublicStorageUrl(`${basePath}${sku}_right_temple.png`);
-
-  const leftArm = buildPublicStorageUrl(`${basePath}${sku}_left_arm.png`);
-  const rightArm = buildPublicStorageUrl(`${basePath}${sku}_right_arm.png`);
-
-  const arms = buildPublicStorageUrl(`${basePath}${sku}_arms.png`); // alternativa 1 sola imagen
-
   return {
-    mode: "sku",
-    sku,
-    single: { url: one, dbFallback: dbImg },
-    two: { frame, lens: lensPng, fallback: one },
-    four: {
-      frame,
-      lens: lensPng,
-      leftTemple,
-      rightTemple,
-      leftArm,
-      rightArm,
-      arms,
-      fallback: one
-    }
+    one: `${basePath}${sku}.png`,
+    frame: `${basePath}${sku}_frame.png`,
+    lens: `${basePath}${sku}_lens.png`,
+    leftTemple: `${basePath}${sku}_left_temple.png`,
+    rightTemple: `${basePath}${sku}_right_temple.png`,
+    leftArm: `${basePath}${sku}_left_arm.png`,
+    rightArm: `${basePath}${sku}_right_arm.png`,
+    arms: `${basePath}${sku}_arms.png`,
   };
 }
 
+// Carga imagen sin romper nada
 function loadImageSafe(url) {
   return new Promise((resolve) => {
     if (!url) return resolve(null);
+
+    // “limpieza” extra por si quedó algún espacio o salto
+    const u = String(url).trim().replace(/\s/g, "%20");
+
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
-    img.src = url;
+    img.src = u;
   });
 }
 
-// Intenta detectar automáticamente si existen 4/3/2/1 PNG
+// Intenta detectar automáticamente 4/3/2/1 PNG en 2 folders (slug y fallback)
 async function loadLensAssets(lens) {
-  const cand = getAssetCandidatesForLens(lens);
+  const skuRaw = lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "";
+  const sku = normalizeSku(skuRaw);
 
-  // Sin SKU → imagen_url de DB (si existe)
-  if (cand.mode === "no_sku") {
-    const img = await loadImageSafe(cand.dbImg);
+  const dbImg = String(lens?.imagen_url || "").trim();
+
+  // Sin SKU → imagen_url DB
+  if (!sku) {
+    const img = await loadImageSafe(dbImg);
     return { type: "single", single: img };
   }
 
-  // 1) Probar frame + lens (base para 2 o 4)
-  const [frameBase, lensBase] = await Promise.all([
-    loadImageSafe(cand.two.frame),
-    loadImageSafe(cand.two.lens),
-  ]);
+  const folderPrimary = getLensFolderForClientPrimary();
+  const folderFallback = getLensFolderFallback();
 
-  if (frameBase && lensBase) {
-    // 1a) Probar “arms” única (más simple)
-    const armsImg = await loadImageSafe(cand.four.arms);
+  // armamos candidatos (primero slug, luego global)
+  const foldersToTry = [folderPrimary];
+  if (folderFallback && folderFallback !== folderPrimary) foldersToTry.push(folderFallback);
 
-    if (armsImg) {
-      return { type: "four", frame: frameBase, lens: lensBase, arms: armsImg };
-    }
+  for (const folder of foldersToTry) {
+    const paths = buildPathsForSku(folder, sku);
 
-    // 1b) Probar left/right (templos o arms)
-    const [tL, tR, aL, aR] = await Promise.all([
-      loadImageSafe(cand.four.leftTemple),
-      loadImageSafe(cand.four.rightTemple),
-      loadImageSafe(cand.four.leftArm),
-      loadImageSafe(cand.four.rightArm),
+    // URLs
+    const urlOne = buildPublicStorageUrl(paths.one);
+    const urlFrame = buildPublicStorageUrl(paths.frame);
+    const urlLens = buildPublicStorageUrl(paths.lens);
+
+    const urlArms = buildPublicStorageUrl(paths.arms);
+    const urlLT = buildPublicStorageUrl(paths.leftTemple);
+    const urlRT = buildPublicStorageUrl(paths.rightTemple);
+    const urlLA = buildPublicStorageUrl(paths.leftArm);
+    const urlRA = buildPublicStorageUrl(paths.rightArm);
+
+    // 1) Probar frame + lens
+    const [frameBase, lensBase] = await Promise.all([
+      loadImageSafe(urlFrame),
+      loadImageSafe(urlLens),
     ]);
 
-    // Si hay al menos un par válido, devolvemos four
-    const left = tL || aL || null;
-    const right = tR || aR || null;
+    if (frameBase && lensBase) {
+      // arms única
+      const armsImg = await loadImageSafe(urlArms);
+      if (armsImg) {
+        console.log("ASSETS OK (four:arms)", { sku, folder, urlFrame, urlLens, urlArms });
+        return { type: "four", frame: frameBase, lens: lensBase, arms: armsImg };
+      }
 
-    if (left || right) {
-      return { type: "four", frame: frameBase, lens: lensBase, leftTemple: left, rightTemple: right };
+      // left/right
+      const [tL, tR, aL, aR] = await Promise.all([
+        loadImageSafe(urlLT),
+        loadImageSafe(urlRT),
+        loadImageSafe(urlLA),
+        loadImageSafe(urlRA),
+      ]);
+
+      const left = tL || aL || null;
+      const right = tR || aR || null;
+
+      if (left || right) {
+        console.log("ASSETS OK (four:l/r)", { sku, folder, urlFrame, urlLens, left: !!left, right: !!right });
+        return { type: "four", frame: frameBase, lens: lensBase, leftTemple: left, rightTemple: right };
+      }
+
+      console.log("ASSETS OK (two)", { sku, folder, urlFrame, urlLens });
+      return { type: "two", frame: frameBase, lens: lensBase };
     }
 
-    // Si no hay patillas, queda en 2 capas
-    return { type: "two", frame: frameBase, lens: lensBase };
+    // 2) fallback 1PNG
+    const one = await loadImageSafe(urlOne);
+    if (one) {
+      console.log("ASSETS OK (single by sku)", { sku, folder, urlOne });
+      return { type: "single", single: one };
+    }
+
+    // si falló en este folder, probamos el siguiente
+    console.warn("ASSETS FAIL in folder", { sku, folder });
   }
 
-  // 2) fallback 1PNG por SKU
-  const one = await loadImageSafe(cand.single.url);
-  if (one) return { type: "single", single: one };
-
   // 3) fallback final a imagen_url DB
-  const dbFallback = await loadImageSafe(cand.single.dbFallback || "");
+  const dbFallback = await loadImageSafe(dbImg);
+  if (dbFallback) {
+    console.log("ASSETS OK (db fallback)", { sku, dbImg });
+  } else {
+    console.warn("ASSETS FAIL (all fallbacks)", { sku, dbImg });
+  }
   return { type: "single", single: dbFallback };
 }
 
 /* =========================
-   ✅ NUEVO: variables globales para el render (compatibles con lo actual)
+   ✅ variables globales para el render (compatibles con lo actual)
    (NO redeclaramos lensImgReady / lensImg, ya viven en bloque 3)
 ========================= */
 let lensAssets = null; // {type:'single'|'two'|'four', ...}
-
-/* =========================
-   ✅ IMPORTANTE:
-   - Tu render actual usa (lensImgReady && lensImg) para dibujar.
-   - Por ahora: si es single, seteamos lensImg para compatibilidad.
-   - Luego en bloque 7 dibujamos por capas usando lensAssets.
-========================= */
 
 async function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
@@ -596,7 +600,7 @@ async function loadCurrentLens() {
   const assets = await loadLensAssets(lens);
   lensAssets = assets;
 
-  // compatibilidad con tu render actual: si es single, seteo lensImg
+  // compatibilidad: si es single, seteamos lensImg
   if (assets?.type === "single") {
     lensImg = assets.single || null;
   }
@@ -610,7 +614,8 @@ async function loadCurrentLens() {
   if (!lensImgReady) {
     console.warn("No se pudo cargar assets del lente:", {
       sku: lens?.sku,
-      imagen_url: lens?.imagen_url
+      imagen_url: lens?.imagen_url,
+      clientSlug: (window.__client?.slug || "")
     });
   }
 }
