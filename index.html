@@ -403,6 +403,10 @@ function getLensFolderForClient() {
   return "default";
 }
 
+// ✅ COMPAT: si en algún lugar quedó el nombre viejo, no rompe
+function getLensFolderForClientPrimary() {
+  return getLensFolderForClient();
+}
 
 // Folder fallback (si no existe en slug)
 function getLensFolderFallback() {
@@ -419,12 +423,21 @@ function normalizeSku(sku) {
   return m ? m[1] : cleaned;
 }
 
-// ✅ arma URL pública y la deja “segura” (evita 400 por caracteres raros)
-function buildPublicStorageUrl(pathInBucket) {
-  const clean = String(pathInBucket || "").replace(/^\/+/, "");
-  const base = `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
+// ✅ codifica cada parte del path (evita 400 por caracteres raros)
+function encodePathPreserveSlashes(path) {
+  const clean = String(path || "").replace(/^\/+/, "");
+  return clean
+    .split("/")
+    .map(seg => encodeURIComponent(seg))
+    .join("/");
+}
 
-  // Si querés forzar recarga en móvil: window.__ASSET_VER__ = "1"
+// ✅ arma URL pública (con path seguro) + cache-bust opcional
+function buildPublicStorageUrl(pathInBucket) {
+  const encodedPath = encodePathPreserveSlashes(pathInBucket);
+  const base = `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${encodedPath}`;
+
+  // Si querés forzar recarga (útil en móvil): window.__ASSET_VER__ = "1"
   const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
   return ver ? `${base}?v=${encodeURIComponent(ver)}` : base;
 }
@@ -450,8 +463,7 @@ function loadImageSafe(url) {
   return new Promise((resolve) => {
     if (!url) return resolve(null);
 
-    // “limpieza” extra por si quedó algún espacio o salto
-    const u = String(url).trim().replace(/\s/g, "%20");
+    const u = String(url).trim(); // ✅ no “reemplazamos espacios” acá; ya codificamos el path arriba
 
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -474,6 +486,7 @@ async function loadLensAssets(lens) {
     return { type: "single", single: img };
   }
 
+  // ✅ usá primary “real” (y si alguien llama al viejo, igual funciona)
   const folderPrimary = getLensFolderForClientPrimary();
   const folderFallback = getLensFolderFallback();
 
@@ -609,26 +622,33 @@ async function loadCurrentLens() {
   lensImg = null;
   lensAssets = null;
 
-  const assets = await loadLensAssets(lens);
-  lensAssets = assets;
+  try {
+    const assets = await loadLensAssets(lens);
+    lensAssets = assets;
 
-  // compatibilidad: si es single, seteamos lensImg
-  if (assets?.type === "single") {
-    lensImg = assets.single || null;
-  }
+    // compatibilidad: si es single, seteamos lensImg
+    if (assets?.type === "single") {
+      lensImg = assets.single || null;
+    }
 
-  lensImgReady = !!(
-    (assets?.type === "single" && assets.single) ||
-    (assets?.type === "two" && assets.frame && assets.lens) ||
-    (assets?.type === "four" && assets.frame && assets.lens)
-  );
+    lensImgReady = !!(
+      (assets?.type === "single" && assets.single) ||
+      (assets?.type === "two" && assets.frame && assets.lens) ||
+      (assets?.type === "four" && assets.frame && assets.lens)
+    );
 
-  if (!lensImgReady) {
-    console.warn("No se pudo cargar assets del lente:", {
-      sku: lens?.sku,
-      imagen_url: lens?.imagen_url,
-      clientSlug: (window.__client?.slug || "")
-    });
+    if (!lensImgReady) {
+      console.warn("No se pudo cargar assets del lente:", {
+        sku: lens?.sku,
+        imagen_url: lens?.imagen_url,
+        clientSlug: (window.__client?.slug || "")
+      });
+    }
+  } catch (e) {
+    console.warn("loadLensAssets error:", e);
+    lensImgReady = false;
+    lensImg = null;
+    lensAssets = null;
   }
 }
 
@@ -636,13 +656,13 @@ async function loadCurrentLens() {
 prevBtn.onclick = () => {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
   currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
-  loadCurrentLens();
+  loadCurrentLens().catch(err => console.warn("loadCurrentLens prev error:", err));
 };
 
 nextBtn.onclick = () => {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
-  loadCurrentLens();
+  loadCurrentLens().catch(err => console.warn("loadCurrentLens next error:", err));
 };
 
 /* =========================
