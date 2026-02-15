@@ -739,7 +739,15 @@ faceMesh.onResults((results) => {
     if (!faces || !faces.length) return;
 
     // Si tenés renderer por capas
-    const hasLayered = (typeof window.__drawARLayered === "function");
+    // ✅ Usar capas SOLO si hay assets por capas cargados
+const canLayer =
+  (typeof window.__drawARLayered === "function") &&
+  (typeof lensAssets !== "undefined") &&
+  lensAssets &&
+  (lensAssets.type === "two" || lensAssets.type === "four");
+
+const hasLayered = canLayer;
+
 
     const lm = faces[0];
     const L = lm[33];
