@@ -388,11 +388,21 @@ const SUPABASE_PROJECT_URL = "https://romgbrobvperljaviekj.supabase.co";
 const STORAGE_BUCKET = "facelens-assets";
 
 // Folder principal por cliente (slug)
-function getLensFolderForClientPrimary() {
+function getLensFolderForClient() {
   const c = window.__client || {};
-  const s = String(c.slug || "").trim();
-  return s || "default";
+
+  // 1) prioridad: __client.slug
+  const s1 = String(c.slug || "").trim();
+  if (s1) return s1;
+
+  // 2) fallback: variable global "slug" (la que ya usás en el proyecto)
+  const s2 = (typeof slug !== "undefined") ? String(slug || "").trim() : "";
+  if (s2) return s2;
+
+  // 3) último fallback
+  return "default";
 }
+
 
 // Folder fallback (si no existe en slug)
 function getLensFolderFallback() {
@@ -412,9 +422,11 @@ function normalizeSku(sku) {
 // ✅ arma URL pública y la deja “segura” (evita 400 por caracteres raros)
 function buildPublicStorageUrl(pathInBucket) {
   const clean = String(pathInBucket || "").replace(/^\/+/, "");
-  const full = `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
-  // encodeURI respeta : / ? & = y encodea espacios y cosas raras
-  return encodeURI(full);
+  const base = `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${clean}`;
+
+  // Si querés forzar recarga en móvil: window.__ASSET_VER__ = "1"
+  const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
+  return ver ? `${base}?v=${encodeURIComponent(ver)}` : base;
 }
 
 // candidatos de paths para un SKU dentro de un folder
