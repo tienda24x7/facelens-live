@@ -753,21 +753,21 @@ function startAR() {
         // Zoom smoothing (más rápido = responde al acercar/alejar)
         Tw: 0.22,
 
-        // Tamaño base (antes usabas mapeo k*eyeNorm; ahora usamos eyeDist * factor)
+        // Tamaño base
         baseFactor: 2.05,
 
         // Límites (suaves) relativos al canvas
-        minWRatio: 0.08,   // si lo dejás muy alto, “se plancha” cuando te alejás
-        maxWRatio: 0.52,   // techo para que no tape toda la cara
+        minWRatio: 0.08,
+        maxWRatio: 0.52,
 
-        // Freno progresivo cuando estás MUY cerca (evita que explote)
-        nearStart: 0.22,   // eyeDist/canvasW donde empieza a frenar
-        nearEnd:   0.34,   // donde el freno ya está completo
-        nearBrake: 0.70    // multiplicador final en extremo cerca (reduce tamaño)
+        // Freno progresivo cuando estás MUY cerca
+        nearStart: 0.22,
+        nearEnd:   0.34,
+        nearBrake: 0.70
       };
     }
 
-    // Desktop: mantiene lo que venía funcionando, pero con freno de “muy cerca”
+    // Desktop
     return {
       Tpos: 0.18,
       Td: 0.16,
@@ -783,29 +783,24 @@ function startAR() {
     };
   }
 
-faceMesh.onResults((results) => {
-  try {
+  faceMesh.onResults((results) => {
     if (!video.videoWidth || !video.videoHeight) return;
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(results.image, 0,0,canvas.width,canvas.height);
 
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
 
-    // Si tenés renderer por capas
-    // ✅ Usar capas SOLO si hay assets por capas cargados
-const canLayer =
-  (typeof window.__drawARLayered === "function") &&
-  (typeof lensAssets !== "undefined") &&
-  lensAssets &&
-  (lensAssets.type === "two" || lensAssets.type === "four");
+    // Si tenés renderer por capas, lo usa. Si no, fallback a lensImg.
+    const hasLayered = (typeof window.__drawARLayered === "function");
 
-const hasLayered = canLayer;
-
+    if (!hasLayered) {
+      if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
+    }
 
     const lm = faces[0];
     const L = lm[33];
@@ -838,8 +833,7 @@ const hasLayered = canLayer;
       smoothY = targetY;
       smoothA = angle;
       smoothD = eyeDistPx;
-      smoothW = null; // ancho final suavizado
-      smoothS = null; // ratio móvil suavizado
+      smoothW = null; // se inicializa luego
     } else {
       smoothX = lerp(smoothX, targetX, P.Tpos);
       smoothY = lerp(smoothY, targetY, P.Tpos);
@@ -850,119 +844,53 @@ const hasLayered = canLayer;
       smoothD = lerp(smoothD, eyeDistPx, P.Td);
     }
 
-    // =========================
-    // ✅ CÁLCULO ÚNICO DE desiredW
-    // =========================
-    let desiredW;
+    // ==============
+    // Zoom robusto
+    // ==============
 
+    let baseW = smoothD * P.baseFactor * scale;
+
+    // freno progresivo cuando estás MUY cerca
+    const dRatio = smoothD / Math.max(1, canvas.width);
+    const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
+    const tNear = Math.max(0, Math.min(1, tNearRaw));
+    const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
+    const brake = 1 - tNearSmooth * (1 - P.nearBrake);
+    baseW *= brake;
+
+    // límites (suaves)
+    let minW, maxW;
     if (mobile) {
-      // ✅ MÓVIL: responde a la distancia con 2 señales simples:
-      const eyeNorm = eyeDistPx / Math.max(1, canvas.width);
-
-      const top = lm[10]  ? (lm[10].y  * canvas.height) : 0;   // frente
-      const bot = lm[152] ? (lm[152].y * canvas.height) : 0;   // mentón
-      const faceH = Math.max(0, bot - top);
-      const faceNorm = faceH / Math.max(1, canvas.height);
-
-      // Ajustes (solo móvil)
-      const kEye  = 4.6;
-      const kFace = 0.9;
-
-      let ratio = (kEye * eyeNorm + kFace * faceNorm) * scale;
-
-      // límites de ratio
-      ratio = Math.max(0.035, Math.min(0.90, ratio));
-
-      // suavizado ratio (más rápido en móvil)
-      smoothS = (smoothS === null) ? ratio : lerp(smoothS, ratio, P.Tsize);
-
-      const maxW = canvas.width * P.maxWRatio;
-      const minW = canvas.width * 0.035;
-
-      desiredW = canvas.width * smoothS;
-      desiredW = Math.max(minW, Math.min(desiredW, maxW));
-
+      minW = canvas.width * P.minWRatio;
+      maxW = canvas.width * P.maxWRatio;
     } else {
-      // ✅ DESKTOP: tu lógica original (no tocar)
-      let baseW = smoothD * P.baseFactor * scale;
-
-      // freno progresivo cuando estás MUY cerca
-      const dRatio = smoothD / Math.max(1, canvas.width);
-      const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
-      const tNear = Math.max(0, Math.min(1, tNearRaw));
-      const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
-      const brake = 1 - tNearSmooth * (1 - P.nearBrake);
-      baseW *= brake;
-
-      const minW = P.minWpx;
-      const maxW = canvas.width * P.maxWRatio;
-
-      desiredW = Math.max(minW, Math.min(baseW, maxW));
+      minW = P.minWpx;
+      maxW = canvas.width * P.maxWRatio;
     }
 
-    // =========================
-    // ✅ suavizado final del ancho (anti-temblor)
-    // =========================
+    const desiredW = softClamp(baseW, minW, maxW);
+
+    // suavizado final del ancho
     if (smoothW === null) smoothW = desiredW;
     else smoothW = lerp(smoothW, desiredW, P.Tw);
 
     const targetW = smoothW;
 
-    // =========================
-    // ✅ DIBUJO: capas con fallback a PNG simple
-    // =========================
-
-    // helper: dibujar PNG simple (solo si existe)
-    function drawSingle() {
-      if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return false;
-
-      const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
-      const targetH = targetW * aspect;
-
-      ctx.save();
-      ctx.translate(smoothX, smoothY);
-      ctx.rotate(smoothA);
-      ctx.drawImage(lensImg, -targetW / 2, -targetH / 2, targetW, targetH);
-      ctx.restore();
-      return true;
+    // dibujar (capas o single)
+    if (hasLayered) {
+      window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
+      return;
     }
 
-    let drawn = false;
+    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+    const targetH = targetW * aspect;
 
-    // 1) Intentar capas si existe y si hay assets listos
-    if (hasLayered && lensImgReady) {
-      try {
-        // Si tu __drawARLayered devuelve true/false, lo respetamos.
-        const res = window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
-        drawn = (res !== false); // si devuelve false explícito, consideramos que no dibujó
-      } catch (e) {
-        console.warn("⚠️ __drawARLayered falló, hago fallback a PNG:", e);
-        drawn = false;
-      }
-    }
-
-    // 2) Fallback: PNG simple
-    if (!drawn) {
-      const ok = drawSingle();
-      if (!ok) {
-        // si no hay ni capas ni PNG, al menos no rompemos el video
-        // (y queda log para debug)
-        // console.log("No hay assets listos todavía (lensImgReady=false).");
-      }
-    }
-
-  } catch (err) {
-    // ✅ AIRBAG: si algo falla, NO se congela el video
-    console.warn("AR error (no congela):", err);
-    try {
-      if (results?.image) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-      }
-    } catch (e) {}
-  }
-});
-
+    ctx.save();
+    ctx.translate(smoothX, smoothY);
+    ctx.rotate(smoothA);
+    ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
+    ctx.restore();
+  });
 
   const camera = new Camera(video, {
     onFrame: async () => { await faceMesh.send({ image: video }); },
