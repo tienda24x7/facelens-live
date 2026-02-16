@@ -754,9 +754,10 @@ function startAR() {
     minWRatio: 0.05,  // ✅ permite achicar mucho al alejarse
     maxWRatio: 0.52,
 
-    nearStart: 0.22,
-    nearEnd:   0.34,
-    nearBrake: 0.70
+    nearStart: 0.30,  // empieza a frenar más tarde
+nearEnd:   0.42,  // frena completo más tarde
+nearBrake: 0.92   // frena menos (casi no achica)
+
   };
 }
 
