@@ -745,27 +745,21 @@ function startAR() {
   // Params por dispositivo
   function getParams() {
     if (isMobileDevice()) {
-      return {
-        // Pose smoothing
-        Tpos: 0.18,
-        // Dist smoothing (más lento = menos saltos en móvil)
-        Td: 0.14,
-        // Zoom smoothing (más rápido = responde al acercar/alejar)
-        Tw: 0.22,
+  return {
+    Tpos: 0.18,
+    Td: 0.14,
+    Tw: 0.28,        // ✅ responde más rápido en móvil
 
-        // Tamaño base
-        baseFactor: 2.05,
+    baseFactor: 2.35, // ✅ un poco más grande / más sensible
+    minWRatio: 0.05,  // ✅ permite achicar mucho al alejarse
+    maxWRatio: 0.52,
 
-        // Límites (suaves) relativos al canvas
-        minWRatio: 0.08,
-        maxWRatio: 0.52,
+    nearStart: 0.22,
+    nearEnd:   0.34,
+    nearBrake: 0.70
+  };
+}
 
-        // Freno progresivo cuando estás MUY cerca
-        nearStart: 0.22,
-        nearEnd:   0.34,
-        nearBrake: 0.70
-      };
-    }
 
     // Desktop
     return {
