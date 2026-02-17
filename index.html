@@ -866,7 +866,12 @@ if (mobile) {
 
   // 2) t = 0 cuando está lejos, t = 1 cuando está cerca
   let t = (eyeNorm - far) / (near - far);
-  t = smoothstep01(clamp01(t)); // freno suave
+t = smoothstep01(clamp01(t)); // freno suave
+
+// ✅ INVERTIR porque en tu móvil eyeNorm se comporta al revés:
+// ahora: cerca = grande, lejos = chico
+t = 1 - t;
+
 
   // 3) Ancho final entre min y max (con freno)
   minW = canvas.width * P.minWRatio;
