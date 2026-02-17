@@ -843,55 +843,63 @@ nearBrake: 0.98   // frena menos (casi no achica)
 // Zoom robusto
 // ==============
 
-let baseW;
+// helper: clamp y smoothstep
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+function smoothstep01(t){ return t*t*(3 - 2*t); }
+
+let desiredW;
+
+// ✅ límites (mantenemos tus ratios)
+let minW, maxW;
 
 if (mobile) {
-  // ✅ MÓVIL: usar distancia NORMALIZADA (0..1), no pixeles
-  // Esto evita que el cambio de resolución del video invierta el zoom.
-  const Lx = L.x, Ly = L.y;
-  const Rx = R.x, Ry = R.y;
+  // ✅ MÓVIL: frenamos con una curva (no depende de baseW en pixeles)
+  // Distancia normalizada entre ojos (0..~0.25 aprox)
+  const eyeNorm = Math.hypot(R.x - L.x, R.y - L.y);
 
-  // Distancia de ojos en coordenadas normalizadas (independiente del videoWidth)
-  const eyeNorm = Math.hypot(Rx - Lx, Ry - Ly); // más cerca => más grande
+  // 1) Definimos rango "lejos" y "cerca"
+  //    - si te alejás, eyeNorm cae hacia far
+  //    - si te acercás, eyeNorm sube hacia near
+  // Ajustá SOLO estos 2 si hace falta:
+  const far  = 0.065; // lejos
+  const near = 0.120; // cerca
 
-  // Ajuste simple (tocás SOLO este número si queda grande/chico)
-  // - más grande: subí k (3.2 / 3.6)
-  // - más chico: bajá k (2.4 / 2.0)
-  const k = 3.4;
+  // 2) t = 0 cuando está lejos, t = 1 cuando está cerca
+  let t = (eyeNorm - far) / (near - far);
+  t = smoothstep01(clamp01(t)); // freno suave
 
-  // Convertimos a pixeles usando canvas.width como referencia visual
-  baseW = (k * eyeNorm) * canvas.width * scale;
+  // 3) Ancho final entre min y max (con freno)
+  minW = canvas.width * P.minWRatio;
+  maxW = canvas.width * P.maxWRatio;
+
+  // ✅ si querés un “10% más” en móvil, tocá este gain
+  const gain = 1.00;
+
+  desiredW = (minW + (maxW - minW) * t) * gain;
 
 } else {
-  // ✅ DESKTOP: igual que estabas usando
-  baseW = smoothD * P.baseFactor * scale;
+  // ✅ DESKTOP: igual que antes (NO tocar)
+  let baseW = smoothD * P.baseFactor * scale;
 
   const dRatio = smoothD / Math.max(1, canvas.width);
   const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
   const tNear = Math.max(0, Math.min(1, tNearRaw));
   const tNearSmooth = tNear * tNear * (3 - 2 * tNear);
   const brake = 1 - tNearSmooth * (1 - P.nearBrake);
-
   baseW *= brake;
-}
 
-// límites (suaves)
-let minW, maxW;
-if (mobile) {
-  minW = canvas.width * P.minWRatio;
-  maxW = canvas.width * P.maxWRatio;
-} else {
   minW = P.minWpx;
   maxW = canvas.width * P.maxWRatio;
+
+  desiredW = softClamp(baseW, minW, maxW);
 }
 
-const desiredW = softClamp(baseW, minW, maxW);
-
-// suavizado final del ancho
+// ✅ suavizado final del ancho (anti-temblor)
 if (smoothW === null) smoothW = desiredW;
 else smoothW = lerp(smoothW, desiredW, P.Tw);
 
 const targetW = smoothW;
+
 
 // dibujar (capas o single)
 if (hasLayered) {
