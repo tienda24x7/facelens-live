@@ -847,20 +847,20 @@ nearBrake: 0.98   // frena menos (casi no achica)
 let baseW;
 
 if (mobile) {
-  // ✅ MÓVIL: usamos el "inverso" de la distancia para corregir:
-  // antes: me acerco = chico / me alejo = grande
-  // ahora: me acerco = grande / me alejo = chico
+  // ✅ MÓVIL: proporcional a la distancia (NO inverso)
+  // - me acerco: dRatioM sube  => lente más grande
+  // - me alejo:  dRatioM baja  => lente más chico
 
-  // ratio de "tamaño de ojos vs ancho" (más cerca = más grande normalmente)
+  // ratio de "distancia de ojos vs ancho" (más cerca = más grande)
   const dRatioM = Math.max(0.01, smoothD / Math.max(1, canvas.width));
 
   // Ajuste simple (tocás SOLO este número si queda grande/chico)
-  // - más grande: subí k (0.30 / 0.34)
-  // - más chico: bajá k (0.22 / 0.18)
-  const k = 0.26;
+  // - más grande: subí k (0.40 / 0.45)
+  // - más chico: bajá k (0.28 / 0.22)
+  const k = 2.60;
 
-  // inverso: si dRatioM sube, 1/dRatioM baja (y viceversa)
-  baseW = (k / dRatioM) * canvas.width * scale;
+  // ✅ correcto: proporcional (no inverso)
+  baseW = (k * dRatioM) * canvas.width * scale;
 
 } else {
   // ✅ DESKTOP: igual que estabas usando
@@ -875,7 +875,6 @@ if (mobile) {
 
   baseW *= brake;
 }
-
 // límites (suaves)
 let minW, maxW;
 if (mobile) {
