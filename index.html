@@ -843,38 +843,38 @@ nearBrake: 0.98   // frena menos (casi no achica)
 // Zoom robusto
 // ==============
 
-// ✅ baseW distinto para móvil vs desktop (SOLO cambiamos móvil)
 let baseW;
 
 if (mobile) {
-  // ✅ MÓVIL: proporcional a la distancia (NO inverso)
-  // - me acerco: dRatioM sube  => lente más grande
-  // - me alejo:  dRatioM baja  => lente más chico
+  // ✅ MÓVIL: usar distancia NORMALIZADA (0..1), no pixeles
+  // Esto evita que el cambio de resolución del video invierta el zoom.
+  const Lx = L.x, Ly = L.y;
+  const Rx = R.x, Ry = R.y;
 
-  // ratio de "distancia de ojos vs ancho" (más cerca = más grande)
-  const dRatioM = Math.max(0.01, smoothD / Math.max(1, canvas.width));
+  // Distancia de ojos en coordenadas normalizadas (independiente del videoWidth)
+  const eyeNorm = Math.hypot(Rx - Lx, Ry - Ly); // más cerca => más grande
 
   // Ajuste simple (tocás SOLO este número si queda grande/chico)
-  // - más grande: subí k (0.40 / 0.45)
-  // - más chico: bajá k (0.28 / 0.22)
-  const k = 2.60;
+  // - más grande: subí k (3.2 / 3.6)
+  // - más chico: bajá k (2.4 / 2.0)
+  const k = 3.0;
 
-  // ✅ correcto: proporcional (no inverso)
-  baseW = (k * dRatioM) * canvas.width * scale;
+  // Convertimos a pixeles usando canvas.width como referencia visual
+  baseW = (k * eyeNorm) * canvas.width * scale;
 
 } else {
   // ✅ DESKTOP: igual que estabas usando
   baseW = smoothD * P.baseFactor * scale;
 
-  // freno progresivo cuando estás MUY cerca (solo desktop)
   const dRatio = smoothD / Math.max(1, canvas.width);
   const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
   const tNear = Math.max(0, Math.min(1, tNearRaw));
-  const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
+  const tNearSmooth = tNear * tNear * (3 - 2 * tNear);
   const brake = 1 - tNearSmooth * (1 - P.nearBrake);
 
   baseW *= brake;
 }
+
 // límites (suaves)
 let minW, maxW;
 if (mobile) {
