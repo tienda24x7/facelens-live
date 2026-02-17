@@ -839,22 +839,40 @@ nearBrake: 0.98   // frena menos (casi no achica)
       smoothD = lerp(smoothD, eyeDistPx, P.Td);
     }
 
-  // ==============
+// ==============
 // Zoom robusto
 // ==============
 
-let baseW = smoothD * P.baseFactor * scale;
+// ✅ baseW distinto para móvil vs desktop (SOLO cambiamos móvil)
+let baseW;
 
-// freno progresivo cuando estás MUY cerca
-const dRatio = smoothD / Math.max(1, canvas.width);
-const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
-const tNear = Math.max(0, Math.min(1, tNearRaw));
-const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
-const brake = 1 - tNearSmooth * (1 - P.nearBrake);
+if (mobile) {
+  // ✅ MÓVIL: usamos el "inverso" de la distancia para corregir:
+  // antes: me acerco = chico / me alejo = grande
+  // ahora: me acerco = grande / me alejo = chico
 
-// ✅ SOLO DESKTOP: aplicamos freno
-// (En móvil lo desactivamos para testear si esto estaba invirtiendo el zoom)
-if (!mobile) {
+  // ratio de "tamaño de ojos vs ancho" (más cerca = más grande normalmente)
+  const dRatioM = Math.max(0.01, smoothD / Math.max(1, canvas.width));
+
+  // Ajuste simple (tocás SOLO este número si queda grande/chico)
+  // - más grande: subí k (0.30 / 0.34)
+  // - más chico: bajá k (0.22 / 0.18)
+  const k = 0.26;
+
+  // inverso: si dRatioM sube, 1/dRatioM baja (y viceversa)
+  baseW = (k / dRatioM) * canvas.width * scale;
+
+} else {
+  // ✅ DESKTOP: igual que estabas usando
+  baseW = smoothD * P.baseFactor * scale;
+
+  // freno progresivo cuando estás MUY cerca (solo desktop)
+  const dRatio = smoothD / Math.max(1, canvas.width);
+  const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
+  const tNear = Math.max(0, Math.min(1, tNearRaw));
+  const tNearSmooth = tNear * tNear * (3 - 2 * tNear); // smoothstep
+  const brake = 1 - tNearSmooth * (1 - P.nearBrake);
+
   baseW *= brake;
 }
 
@@ -868,28 +886,28 @@ if (mobile) {
   maxW = canvas.width * P.maxWRatio;
 }
 
-    const desiredW = softClamp(baseW, minW, maxW);
+const desiredW = softClamp(baseW, minW, maxW);
 
-    // suavizado final del ancho
-    if (smoothW === null) smoothW = desiredW;
-    else smoothW = lerp(smoothW, desiredW, P.Tw);
+// suavizado final del ancho
+if (smoothW === null) smoothW = desiredW;
+else smoothW = lerp(smoothW, desiredW, P.Tw);
 
-    const targetW = smoothW;
+const targetW = smoothW;
 
-    // dibujar (capas o single)
-    if (hasLayered) {
-      window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
-      return;
-    }
+// dibujar (capas o single)
+if (hasLayered) {
+  window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
+  return;
+}
 
-    const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
-    const targetH = targetW * aspect;
+const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
+const targetH = targetW * aspect;
 
-    ctx.save();
-    ctx.translate(smoothX, smoothY);
-    ctx.rotate(smoothA);
-    ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
-    ctx.restore();
+ctx.save();
+ctx.translate(smoothX, smoothY);
+ctx.rotate(smoothA);
+ctx.drawImage(lensImg, -targetW/2, -targetH/2, targetW, targetH);
+ctx.restore();
   });
 
   const camera = new Camera(video, {
