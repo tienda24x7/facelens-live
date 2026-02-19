@@ -870,7 +870,7 @@ if (mobile) {
   const eyeNorm = Math.hypot(R.x - L.x, R.y - L.y); // 0..1 aprox
 
   // Base: cerca => eyeNorm sube => baseW sube (correcto)
-  let baseW = canvas.width * eyeNorm * P.baseFactor * scale;
+  let baseW = canvas.width * eyeNorm * P.baseFactor / scale;
 
   // Freno suave “muy cerca” (para que no explote)
   const tNearRaw = (eyeNorm - P.nearStart) / (P.nearEnd - P.nearStart);
