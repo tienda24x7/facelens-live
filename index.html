@@ -708,7 +708,7 @@ function startAR() {
   });
 
   let smoothX = null, smoothY = null, smoothA = null;
-  let smoothD = null;   // eyeDist suavizado (px) -> desktop
+  let smoothD = null;   // eyeDist suavizado (px)
   let smoothW = null;   // ancho final suavizado (px)
   const lerp = (a,b,t)=>a+(b-a)*t;
   const normAngle = (a)=>Math.atan2(Math.sin(a), Math.cos(a));
@@ -752,30 +752,30 @@ function startAR() {
       return {
         // Pose
         Tpos: 0.18,
-        // (no usamos smoothD para tamaño en móvil, pero lo dejamos igual)
+        // Suavizado de distancia (sí lo usamos para tamaño ahora)
         Td: 0.14,
         // Zoom smoothing
         Tw: 0.28,
 
-        // ✅ MÓVIL: baseFactor ahora multiplica eyeNorm * canvasW (no pixeles)
-        // Si lo ves chico: subí a 4.0 / 4.4
-        // Si lo ves grande: bajá a 3.2 / 3.0
-        baseFactor: 3.6,
+        // ✅ MÓVIL (FIX): baseFactor vuelve a ser multiplicador de eyeDistPx (igual que desktop)
+        // Ajuste típico:
+        // - Si lo ves chico: subí a 2.1 / 2.3
+        // - Si lo ves grande: bajá a 1.7 / 1.6
+        baseFactor: 1.90,
 
         // Límites relativos al canvas
-        // (minWRatio demasiado bajo = “microscópico”)
         minWRatio: 0.16,
         maxWRatio: 0.60,
 
-        // ✅ Freno “muy cerca” PERO en escala eyeNorm (no dRatio px)
-// (invertido para test)
-nearStart: 0.155,
-nearEnd:   0.115,
-nearBrake: 0.18
+        // ✅ Freno "muy cerca" usando dRatio (smoothD/canvasW), coherente y NO invertido
+        // dRatio sube cuando te acercás
+        nearStart: 0.18,
+        nearEnd:   0.28,
+        nearBrake: 0.78
       };
     }
 
-    // Desktop (igual que lo que te venía funcionando)
+    // Desktop (NO TOCAR)
     return {
       Tpos: 0.18,
       Td: 0.16,
@@ -832,7 +832,7 @@ nearBrake: 0.18
     const dx = rx - lx;
     const dy = ry - ly;
 
-    const eyeDistPx = Math.hypot(dx, dy);
+    const eyeDistPx = Math.hypot(dx, dy); // ✅ métrica robusta
     const angle = Math.atan2(dy, dx);
 
     const targetX = nx;
@@ -860,35 +860,44 @@ nearBrake: 0.18
     }
 
     // =================
- // ✅ ZOOM (móvil vs desktop)
- // =================
-let desiredW;
-let minW, maxW;
+    // ✅ ZOOM (móvil vs desktop)
+    // =================
+    let desiredW;
+    let minW, maxW;
 
-if (mobile) {
-  // ✅ MÓVIL: usamos eyeNorm (normalizado) => estable en cualquier resolución
-  const eyeNorm = Math.hypot(R.x - L.x, R.y - L.y); // 0..1 aprox
+    if (mobile) {
+      // ✅ MÓVIL (FIX REAL): usar píxeles suavizados (smoothD) igual que desktop
+      // Esto garantiza: acercás => smoothD sube => lente sube (NO se invierte)
+      let baseW = smoothD * P.baseFactor * scale;
 
-  // Base: cerca => eyeNorm sube => baseW sube (correcto)
-  let baseW = canvas.width * eyeNorm * P.baseFactor * scale;
+      // Freno suave “muy cerca” (evita explosión al pegar la cara)
+      const dRatio = smoothD / Math.max(1, canvas.width); // 0..~0.4 típico
+      const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
+      const tNear = smoothstep01(clamp01(tNearRaw));
+      const brake = 1 - tNear * (1 - P.nearBrake);
+      baseW *= brake;
 
-  // Freno suave “muy cerca” (para que no explote)
-  const tNearRaw = (eyeNorm - P.nearStart) / (P.nearEnd - P.nearStart);
-  const tNear = smoothstep01(clamp01(tNearRaw));
-  const brake = 1 - tNear * (1 - P.nearBrake);
+      minW = canvas.width * P.minWRatio;
+      maxW = canvas.width * P.maxWRatio;
 
-  // ✅ CAMBIO ÚNICO: invertimos el efecto del freno en móvil
-  // Antes: baseW *= brake;  (cerca => más chico)
-  // Ahora:
-  baseW /= Math.max(0.001, brake); // (cerca => más grande)
+      desiredW = softClamp(baseW, minW, maxW);
 
-  minW = canvas.width * P.minWRatio;
-  maxW = canvas.width * P.maxWRatio;
-
-  desiredW = softClamp(baseW, minW, maxW);
+      // Debug opcional (activar en consola: window.__DBG_ZOOM__ = true)
+      if (window.__DBG_ZOOM__) {
+        window.__dbgN = (window.__dbgN || 0) + 1;
+        if (window.__dbgN % 15 === 0) {
+          console.log("[MOBILE ZOOM]", {
+            eyeDistPx: Math.round(eyeDistPx),
+            smoothD: Math.round(smoothD),
+            dRatio: +dRatio.toFixed(3),
+            baseW: Math.round(baseW),
+            desiredW: Math.round(desiredW)
+          });
+        }
+      }
 
     } else {
-      // ✅ DESKTOP: exactamente como venía
+      // ✅ DESKTOP: exactamente como venía (NO TOCAR)
       let baseW = smoothD * P.baseFactor * scale;
 
       const dRatio = smoothD / Math.max(1, canvas.width);
