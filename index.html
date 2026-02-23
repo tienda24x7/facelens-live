@@ -171,7 +171,103 @@
     font-weight:700;
   }
   #onboardLater:hover{ opacity:1; }
-  </style>
+
+  /* =========================
+     ✅ SEARCH OVERLAY (BUSCADOR)  [PASO 2]
+  ========================= */
+  #searchOverlay{
+    position:fixed;
+    inset:0;
+    z-index:9998; /* debajo del onboarding (9999) */
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:14px;
+    background:rgba(0,0,0,.72);
+  }
+
+  #searchCard{
+    width:min(620px, 94vw);
+    max-height:min(78vh, 620px);
+    overflow:hidden;
+    border-radius:16px;
+    padding:12px;
+    background:rgba(20,20,20,.95);
+    box-shadow:0 10px 40px rgba(0,0,0,.55);
+    border:1px solid rgba(255,255,255,.10);
+  }
+
+  #searchHeader{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:10px;
+  }
+
+  #searchTitle{
+    font-weight:900;
+    font-size:15px;
+    opacity:.95;
+  }
+
+  #searchInput{
+    width:100%;
+    padding:12px 12px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.12);
+    outline:none;
+    background:rgba(0,0,0,.35);
+    color:var(--brand-on-primary);
+    font-weight:700;
+  }
+
+  #searchInput::placeholder{ opacity:.65; }
+
+  #searchHint{
+    margin-top:8px;
+    font-size:12px;
+    opacity:.75;
+  }
+
+  #searchResults{
+    margin-top:10px;
+    overflow:auto;
+    max-height:52vh;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(0,0,0,.20);
+  }
+
+  .searchItem{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    padding:10px 12px;
+    cursor:pointer;
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .searchItem:hover{ background:rgba(255,255,255,.06); }
+  .searchItem:last-child{ border-bottom:none; }
+
+  .searchName{
+    font-weight:900;
+    font-size:13px;
+    line-height:1.2;
+  }
+
+  .searchMeta{
+    margin-top:2px;
+    font-size:12px;
+    opacity:.78;
+  }
+
+  .searchEmpty{
+    padding:14px 12px;
+    opacity:.78;
+    font-size:13px;
+  }
+</style>
 </head>
 
 <body>
@@ -207,29 +303,55 @@
   </div>
 
   <div id="ui">
-    <!-- Filtro -->
-    <select id="categoryFilter" style="width:100%;">
-      <option value="all">Todos</option>
-      <option value="clasicos">Clásicos</option>
-      <option value="degrade">Degradé</option>
-      <option value="espejados">Espejados</option>
-      <option value="polarizados">Polarizados</option>
-      <option value="ferrari">Ferrari</option>
-    </select>
+  <!-- Filtro -->
+  <select id="categoryFilter" style="width:100%;">
+    <option value="all">Todos</option>
+    <option value="clasicos">Clásicos</option>
+    <option value="degrade">Degradé</option>
+    <option value="espejados">Espejados</option>
+    <option value="polarizados">Polarizados</option>
+    <option value="ferrari">Ferrari</option>
+  </select>
 
-    <!-- Navegación -->
-    <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
-      <button id="prevBtn" class="secondary" style="min-width:44px;">◀</button>
-      <span id="modelName">Cargando…</span>
-      <button id="nextBtn" class="secondary" style="min-width:44px;">▶</button>
-    </div>
+  <!-- Navegación -->
+  <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
+    <button id="prevBtn" class="secondary" style="min-width:44px;">◀</button>
 
-    <!-- Acciones -->
-    <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-      <button id="captureBtn" class="secondary">📸 Captura</button>
-      <button id="productBtn" class="hidden">🛒 Ver producto</button>
-    </div>
+    <span id="modelName" style="flex:1; text-align:center; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+      Cargando…
+    </span>
+
+    <!-- ✅ Lupa búsqueda -->
+    <button id="searchBtn" class="secondary" style="min-width:44px;" title="Buscar modelo">🔎</button>
+
+    <button id="nextBtn" class="secondary" style="min-width:44px;">▶</button>
   </div>
+
+  <!-- Acciones -->
+  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+    <button id="captureBtn" class="secondary">📸 Captura</button>
+    <button id="productBtn" class="hidden">🛒 Ver producto</button>
+  </div>
+</div>
+
+<!-- =========================
+     ✅ SEARCH OVERLAY (BUSCADOR)
+========================= -->
+<div id="searchOverlay" aria-hidden="true">
+  <div id="searchCard">
+    <div id="searchHeader">
+      <div id="searchTitle">Buscar modelo</div>
+      <button id="searchClose" type="button" class="secondary" style="min-width:44px;">✕</button>
+    </div>
+
+    <input id="searchInput" type="text" placeholder="Escribí modelo, color o SKU…"
+           autocomplete="off" />
+
+    <div id="searchHint">Tip: podés buscar por “Rayban”, “degradé”, o el número de SKU.</div>
+
+    <div id="searchResults"></div>
+  </div>
+</div>
 
   <script>
 /* =========================
@@ -605,6 +727,140 @@ function aplicarFiltro() {
 }
 
 categoryFilter.onchange = aplicarFiltro;
+
+/* =========================
+   5.5) BUSCADOR (LUPA) - usa lentesFiltrados
+========================= */
+const searchBtn = document.getElementById("searchBtn");
+const searchOverlay = document.getElementById("searchOverlay");
+const searchClose = document.getElementById("searchClose");
+const searchInput = document.getElementById("searchInput");
+const searchResults = document.getElementById("searchResults");
+
+function normTxt(s){
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")   // quita acentos
+    .trim();
+}
+
+function lensDisplayName(l){
+  return String(l?.nombre_modelo || l?.nombre || "Modelo").trim();
+}
+
+function lensSku(l){
+  return String(l?.sku || l?.SKU || l?.codigo || l?.id_sku || "").trim();
+}
+
+function openSearch(){
+  if (!searchOverlay) return;
+  searchOverlay.style.display = "flex";
+  searchOverlay.setAttribute("aria-hidden", "false");
+  if (searchInput) {
+    searchInput.value = "";
+    setTimeout(() => searchInput.focus(), 50);
+  }
+  renderSearchResults("");
+}
+
+function closeSearch(){
+  if (!searchOverlay) return;
+  searchOverlay.style.display = "none";
+  searchOverlay.setAttribute("aria-hidden", "true");
+}
+
+function renderSearchResults(q){
+  if (!searchResults) return;
+
+  const query = normTxt(q);
+
+  // base: siempre usamos lo filtrado por categoría (lentesFiltrados)
+  const arr = Array.isArray(lentesFiltrados) ? lentesFiltrados : [];
+  if (!arr.length){
+    searchResults.innerHTML = `<div class="searchEmpty">No hay lentes cargados en esta categoría.</div>`;
+    return;
+  }
+
+  let matches = [];
+  if (!query){
+    matches = arr.slice(0, 25).map((l, idx) => ({ l, idx }));
+  } else {
+    for (let i=0; i<arr.length; i++){
+      const l = arr[i];
+      const name = normTxt(lensDisplayName(l));
+      const sku = normTxt(lensSku(l));
+      const cat = normTxt(l?.categoria || "");
+      if (name.includes(query) || sku.includes(query) || cat.includes(query)){
+        matches.push({ l, idx: i });
+        if (matches.length >= 40) break;
+      }
+    }
+  }
+
+  if (!matches.length){
+    searchResults.innerHTML = `<div class="searchEmpty">Sin resultados. Probá con otra palabra o SKU.</div>`;
+    return;
+  }
+
+  searchResults.innerHTML = matches.map(({l, idx}) => {
+    const name = lensDisplayName(l);
+    const sku = lensSku(l);
+    const cat = String(l?.categoria || "").trim();
+    const meta = [sku && `SKU: ${sku}`, cat && `Cat: ${cat}`].filter(Boolean).join(" • ");
+    return `
+      <div class="searchItem" data-idx="${idx}">
+        <div style="flex:1;">
+          <div class="searchName">${name}</div>
+          <div class="searchMeta">${meta || ""}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  Array.from(searchResults.querySelectorAll(".searchItem")).forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = Number(el.getAttribute("data-idx"));
+      if (!Number.isFinite(idx)) return;
+      currentIndex = idx;
+      closeSearch();
+      loadCurrentLens().catch(err => console.warn("loadCurrentLens search error:", err));
+    });
+  });
+}
+
+// wiring botones
+if (searchBtn) searchBtn.addEventListener("click", openSearch);
+if (searchClose) searchClose.addEventListener("click", closeSearch);
+
+// cerrar tocando afuera
+if (searchOverlay){
+  searchOverlay.addEventListener("click", (e) => {
+    if (e.target === searchOverlay) closeSearch();
+  });
+}
+
+// input handler (con mini debounce)
+let __searchT = null;
+if (searchInput){
+  searchInput.addEventListener("input", () => {
+    clearTimeout(__searchT);
+    __searchT = setTimeout(() => renderSearchResults(searchInput.value), 120);
+  });
+
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeSearch();
+  });
+}
+
+// ✅ Cuando cambia el filtro, si el buscador está abierto, refrescamos resultados
+const _origAplicarFiltro = aplicarFiltro;
+aplicarFiltro = function(){
+  _origAplicarFiltro();
+  if (searchOverlay && searchOverlay.style.display === "flex") {
+    renderSearchResults(searchInput?.value || "");
+  }
+};
 
 /* =========================
    6) LENTES (carga imagen + botón producto)
