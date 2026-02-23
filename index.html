@@ -166,6 +166,94 @@ const productBtn = document.getElementById("productBtn");
 const categoryFilter = document.getElementById("categoryFilter");
 
 /* =========================
+   2.1) CAPTURA (canvas -> share o descarga)
+========================= */
+
+// Convierte dataURL a Blob
+function dataURLToBlob(dataURL) {
+  const parts = dataURL.split(",");
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) u8arr[n] = bstr.charCodeAt(n);
+  return new Blob([u8arr], { type: mime });
+}
+
+// Intenta obtener un nombre de modelo/SKU para el archivo
+function getCaptureName() {
+  try {
+    // si en algún lugar tenés el lente actual guardado
+    const sku1 = window.currentLens?.sku || window.currentLens?.SKU;
+    if (sku1) return String(sku1);
+
+    // patrón típico del proyecto: lentesFiltrados + currentIndex
+    if (typeof lentesFiltrados !== "undefined" && typeof currentIndex !== "undefined") {
+      const l = lentesFiltrados?.[currentIndex];
+      const sku2 = l?.sku || l?.SKU || l?.id;
+      if (sku2) return String(sku2);
+    }
+
+    return "facelens";
+  } catch {
+    return "facelens";
+  }
+}
+
+async function captureAndShare() {
+  try {
+    // Asegura que haya un frame reciente dibujado
+    await new Promise(r => requestAnimationFrame(r));
+
+    if (!canvas || !canvas.width || !canvas.height) {
+      alert("Todavía no está lista la cámara para capturar.");
+      return;
+    }
+
+    // Exporta el canvas (incluye video + lente, porque vos los dibujás ahí)
+    const dataURL = canvas.toDataURL("image/png");
+    const blob = dataURLToBlob(dataURL);
+
+    const name = getCaptureName();
+    const file = new File([blob], `facelens_${name}.png`, { type: "image/png" });
+
+    // 1) Android (y algunos desktops): Web Share API (si soporta files)
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: "FaceLens",
+        text: "Mirá cómo me quedan estos lentes 😎"
+      });
+      return;
+    }
+
+    // 2) Fallback universal: descargar
+    const a = document.createElement("a");
+    a.href = dataURL;
+    a.download = `facelens_${name}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    alert("Listo ✅ Se descargó la captura. Ahora podés adjuntarla en WhatsApp.");
+  } catch (e) {
+    console.error("CAPTURA ❌", e);
+
+    // Caso típico: canvas “tainted” por CORS
+    const msg = String(e?.message || e);
+    if (msg.toLowerCase().includes("tainted") || msg.toLowerCase().includes("security")) {
+      alert("La captura falló por permisos (CORS) al dibujar imágenes. Decime si ves 'tainted canvas' en consola y lo corregimos en la carga de imágenes.");
+      return;
+    }
+
+    alert("No se pudo capturar. Abrí la consola y pegame el error que aparece en rojo.");
+  }
+}
+
+// Hook del botón
+captureBtn.addEventListener("click", captureAndShare);
+
+/* =========================
    3) ESTADO
 ========================= */
 let cliente = null;
