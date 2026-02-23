@@ -49,16 +49,17 @@
     background: linear-gradient(to bottom, rgba(0,0,0,.35), rgba(0,0,0,0));
   }
 
+  /* ✅ Logo +30% (móvil y PC) */
   #brandLogo{
-    height:32px;
-    display:none; /* se muestra cuando carga */
+    height:42px;          /* antes 32px */
+    display:none;         /* se muestra cuando carga */
     pointer-events:none;
     filter: drop-shadow(0 2px 6px rgba(0,0,0,.55));
   }
 
-  /* ✅ Desktop: un poco más grande */
+  /* ✅ Desktop: +30% respecto al anterior desktop (38px -> ~49px) */
   @media (min-width: 900px){
-    #brandLogo{ height:38px; }
+    #brandLogo{ height:50px; }
   }
 
   #brandTitle{
@@ -95,11 +96,86 @@
   button.hidden { display:none }
 
   #modelName { flex:1; text-align:center; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-</style>
+
+  /* =========================
+     ✅ ONBOARDING OVERLAY (1ra vez)
+  ========================= */
+  #onboardOverlay{
+    position:fixed;
+    inset:0;
+    z-index:9999;
+    display:none;                 /* se activa por JS */
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+    background:rgba(0,0,0,.72);
+  }
+
+  #onboardCard{
+    width:min(520px, 92vw);
+    border-radius:16px;
+    padding:16px 16px 14px;
+    background:rgba(20,20,20,.92);
+    box-shadow:0 10px 40px rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.08);
+  }
+
+  #onboardTitle{
+    font-size:16px;
+    font-weight:800;
+    margin:0 0 8px 0;
+  }
+
+  #onboardList{
+    margin:0;
+    padding-left:18px;
+    line-height:1.35;
+    opacity:.95;
+    font-size:14px;
+  }
+
+  #onboardHint{
+    margin-top:10px;
+    font-size:13px;
+    opacity:.85;
+  }
+
+  #onboardActions{
+    margin-top:12px;
+    display:flex;
+    gap:10px;
+    justify-content:flex-end;
+    align-items:center;
+  }
+
+  #onboardBtn{
+    pointer-events:auto;
+    padding:10px 12px;
+    border:none;
+    border-radius:12px;
+    font-weight:800;
+    cursor:pointer;
+
+    /* usa branding si existe */
+    background:var(--brand-accent);
+    color:#000;
+  }
+
+  #onboardLater{
+    pointer-events:auto;
+    background:transparent;
+    border:none;
+    color:var(--brand-on-primary);
+    opacity:.85;
+    cursor:pointer;
+    font-weight:700;
+  }
+  #onboardLater:hover{ opacity:1; }
+  </style>
 </head>
 
 <body>
-  <!-- ✅ BRAND BAR (no rompe nada, queda arriba) -->
+  <!-- ✅ BRAND BAR -->
   <div id="brandBar">
     <img id="brandLogo" alt="Logo" />
     <div id="brandTitle"></div>
@@ -108,6 +184,26 @@
   <div id="container">
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- ✅ ONBOARDING OVERLAY -->
+  <div id="onboardOverlay">
+    <div id="onboardCard">
+      <div id="onboardTitle">Probador virtual FaceLens</div>
+      <ol id="onboardList">
+        <li>Permití la cámara cuando te lo pida el navegador.</li>
+        <li>Ubicá tu cara centrada y con buena luz.</li>
+        <li><b>Distancia sugerida:</b> 30–45 cm del dispositivo (a la altura de los ojos).</li>
+        <li>Usá ◀ ▶ para cambiar modelos y “🛒 Ver producto” para consultar.</li>
+      </ol>
+
+      <div id="onboardHint">Tip: si el lente “baila”, mejorá la luz o mirá de frente a la cámara.</div>
+
+      <div id="onboardActions">
+        <button id="onboardLater" type="button">No mostrar más</button>
+        <button id="onboardBtn" type="button">Entendido</button>
+      </div>
+    </div>
   </div>
 
   <div id="ui">
@@ -135,7 +231,39 @@
     </div>
   </div>
 
-  <script>  
+  <script>
+/* =========================
+   ✅ ONBOARDING OVERLAY (1ra vez por dispositivo)
+========================= */
+(function setupOnboardingOverlay(){
+  const KEY = "facelens_onboard_done_v1";
+
+  const overlay = document.getElementById("onboardOverlay");
+  const btnOk = document.getElementById("onboardBtn");
+  const btnNever = document.getElementById("onboardLater");
+
+  if (!overlay || !btnOk || !btnNever) return;
+
+  function hide() { overlay.style.display = "none"; }
+  function show() { overlay.style.display = "flex"; }
+
+  // Si ya lo vio antes, no mostramos
+  const done = localStorage.getItem(KEY);
+  if (!done) show();
+
+  btnOk.onclick = () => { hide(); };
+
+  btnNever.onclick = () => {
+    localStorage.setItem(KEY, "1");
+    hide();
+  };
+
+  // Cerrar si toca afuera
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) hide();
+  });
+})();
+
 /* =========================
      0) SUPABASE
   ========================= */
@@ -164,94 +292,6 @@ const nextBtn = document.getElementById("nextBtn");
 const captureBtn = document.getElementById("captureBtn");
 const productBtn = document.getElementById("productBtn");
 const categoryFilter = document.getElementById("categoryFilter");
-
-/* =========================
-   2.1) CAPTURA (canvas -> share o descarga)
-========================= */
-
-// Convierte dataURL a Blob
-function dataURLToBlob(dataURL) {
-  const parts = dataURL.split(",");
-  const mime = parts[0].match(/:(.*?);/)[1];
-  const bstr = atob(parts[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) u8arr[n] = bstr.charCodeAt(n);
-  return new Blob([u8arr], { type: mime });
-}
-
-// Intenta obtener un nombre de modelo/SKU para el archivo
-function getCaptureName() {
-  try {
-    // si en algún lugar tenés el lente actual guardado
-    const sku1 = window.currentLens?.sku || window.currentLens?.SKU;
-    if (sku1) return String(sku1);
-
-    // patrón típico del proyecto: lentesFiltrados + currentIndex
-    if (typeof lentesFiltrados !== "undefined" && typeof currentIndex !== "undefined") {
-      const l = lentesFiltrados?.[currentIndex];
-      const sku2 = l?.sku || l?.SKU || l?.id;
-      if (sku2) return String(sku2);
-    }
-
-    return "facelens";
-  } catch {
-    return "facelens";
-  }
-}
-
-async function captureAndShare() {
-  try {
-    // Asegura que haya un frame reciente dibujado
-    await new Promise(r => requestAnimationFrame(r));
-
-    if (!canvas || !canvas.width || !canvas.height) {
-      alert("Todavía no está lista la cámara para capturar.");
-      return;
-    }
-
-    // Exporta el canvas (incluye video + lente, porque vos los dibujás ahí)
-    const dataURL = canvas.toDataURL("image/png");
-    const blob = dataURLToBlob(dataURL);
-
-    const name = getCaptureName();
-    const file = new File([blob], `facelens_${name}.png`, { type: "image/png" });
-
-    // 1) Android (y algunos desktops): Web Share API (si soporta files)
-    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        files: [file],
-        title: "FaceLens",
-        text: "Mirá cómo me quedan estos lentes 😎"
-      });
-      return;
-    }
-
-    // 2) Fallback universal: descargar
-    const a = document.createElement("a");
-    a.href = dataURL;
-    a.download = `facelens_${name}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    alert("Listo ✅ Se descargó la captura. Ahora podés adjuntarla en WhatsApp.");
-  } catch (e) {
-    console.error("CAPTURA ❌", e);
-
-    // Caso típico: canvas “tainted” por CORS
-    const msg = String(e?.message || e);
-    if (msg.toLowerCase().includes("tainted") || msg.toLowerCase().includes("security")) {
-      alert("La captura falló por permisos (CORS) al dibujar imágenes. Decime si ves 'tainted canvas' en consola y lo corregimos en la carga de imágenes.");
-      return;
-    }
-
-    alert("No se pudo capturar. Abrí la consola y pegame el error que aparece en rojo.");
-  }
-}
-
-// Hook del botón
-captureBtn.addEventListener("click", captureAndShare);
 
 /* =========================
    3) ESTADO
@@ -335,7 +375,7 @@ function parseHexToRgb(hex) {
 
 function autoTextOn(bgHex) {
   const rgb = parseHexToRgb(bgHex);
-  if (!rgb) return ""; // si no es hex, no forzamos
+  if (!rgb) return "";
   const lum = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
   return lum > 0.62 ? "#000000" : "#ffffff";
 }
@@ -349,28 +389,21 @@ function tintSurfaceFromPrimary(primaryHex, alpha) {
 
 function getBrandFromClient(cliente) {
   const c = cliente || {};
-
   return {
     name: cleanStr(c.nombre || c.name || ""),
-
-    // ✅ Limpia saltos de línea y espacios
     logoUrl: cleanStr(c.logo_url || c.logo || ""),
-
-    // ✅ solo 2 colores reales del cliente
     primary: cleanStr(c.color_primario || c.color_principal || ""),
-    accent: cleanStr(c.olor_secundario || ""), // ✅ typo mantenido
+    accent: cleanStr(c.olor_secundario || ""),
   };
 }
 
 function applyBrandingFromClient(db, cliente) {
   const brand = getBrandFromClient(cliente);
 
-  // ✅ Derivados automáticos si faltan
   const onPrimary = autoTextOn(brand.primary) || "#ffffff";
   const surface = tintSurfaceFromPrimary(brand.primary, 0.45) || "rgba(0,0,0,.60)";
   const muted = "#333333";
 
-  // 1) Colores (CSS variables)
   const root = document.documentElement;
   if (brand.primary) root.style.setProperty("--brand-primary", brand.primary);
   root.style.setProperty("--brand-surface", surface);
@@ -378,7 +411,6 @@ function applyBrandingFromClient(db, cliente) {
   root.style.setProperty("--brand-muted", muted);
   root.style.setProperty("--brand-on-primary", onPrimary);
 
-  // 2) theme-color (Android barra superior)
   if (brand.primary) {
     let meta = document.querySelector('meta[name="theme-color"]');
     if (!meta) {
@@ -389,7 +421,6 @@ function applyBrandingFromClient(db, cliente) {
     meta.setAttribute("content", brand.primary);
   }
 
-  // 3) Título (opcional)
   const titleEl = document.getElementById("brandTitle");
   if (titleEl) {
     if (brand.name) {
@@ -400,11 +431,9 @@ function applyBrandingFromClient(db, cliente) {
     }
   }
 
-  // 4) Logo
   const logoEl = document.getElementById("brandLogo");
   if (logoEl) {
     const logoUrl = brand.logoUrl || "";
-
     if (logoUrl) {
       const ver = window.__ASSET_VER__ ? `v=${window.__ASSET_VER__}` : `v=${Date.now()}`;
       const src = logoUrl.includes("?") ? `${logoUrl}&${ver}` : `${logoUrl}?${ver}`;
@@ -432,9 +461,6 @@ function applyBrandingFromClient(db, cliente) {
 }
 
 async function loadClientConfig() {
-  // =========================
-  // 1) Cliente por slug
-  // =========================
   const { data: cData, error: cErr } = await db
     .from("clientes_facelens")
     .select("*")
@@ -446,20 +472,16 @@ async function loadClientConfig() {
 
   cliente = cData[0];
 
-  // ✅ Branding: aplica logo + colores apenas tenemos el cliente
   window.__ASSET_VER__ = Date.now();
   try { applyBrandingFromClient(db, cliente); } catch (e) { console.warn("Branding falló:", e); }
 
-  // Guardar cliente global para que lo use el botón/whatsapp
   window.__client = cliente || {};
   window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
   window.__client.default_url = pickFirstClientUrl(window.__client);
 
-  // Plan del cliente
   const planRaw = String(cliente.plan || "ALL").trim();
   const plan = planRaw.toUpperCase();
 
-  // Base query de lentes (siempre del cliente y activos)
   const baseQ = () =>
     db
       .from("lentes")
@@ -467,29 +489,20 @@ async function loadClientConfig() {
       .eq("cliente_id", cliente.id)
       .eq("activo", true);
 
-  // =========================
-  // 2) Traer lentes según plan
-  // =========================
   let gData = [];
   let mode = "ALL";
 
   if (plan === "A" || plan === "B") {
-    // Legacy por grupo
     mode = `GRUPO_${plan}`;
     const { data, error } = await baseQ().eq("grupo", plan);
     if (error) throw new Error("Error leyendo lentes: " + error.message);
     gData = data || [];
-
   } else if (plan === "ALL") {
-    // ALL = todos los lentes del cliente (sin depender de grupo)
     mode = "ALL";
     const { data, error } = await baseQ();
     if (error) throw new Error("Error leyendo lentes: " + error.message);
     gData = data || [];
-
   } else {
-    // Modo catálogo: el plan puede ser "NICOLAS" o "EZEQUIEL"
-    // o varios separados por coma: "NICOLAS,EZEQUIEL"
     const catalogos = plan
       .split(",")
       .map(s => s.trim())
@@ -497,7 +510,6 @@ async function loadClientConfig() {
 
     mode = `CATALOGOS_${catalogos.join("_")}`;
 
-    // 1) buscar asignaciones en lentes_catalogos por catalogo
     const { data: mapData, error: mapErr } = await db
       .from("lentes_catalogos")
       .select("*")
@@ -509,7 +521,6 @@ async function loadClientConfig() {
       .map(pickLensId)
       .filter(Boolean);
 
-    // 2) traer lentes por ids + cliente_id
     if (lensIds.length) {
       const { data, error } = await baseQ().in("id", lensIds);
       if (error) throw new Error("Error leyendo lentes por catálogo: " + error.message);
@@ -518,7 +529,6 @@ async function loadClientConfig() {
       gData = [];
     }
 
-    // Guardamos para debug
     window.__client.catalogos = catalogos;
   }
 
@@ -533,24 +543,17 @@ async function loadClientConfig() {
 
   return { cliente, plan, lentes, mode };
 }
+
 /* =========================
    5) FILTRO
 ========================= */
-
-/**
- * WRAP seguro: cuando se ejecute loadClientConfig(), guardamos
- * el cliente en window.__client para que el botón WhatsApp funcione.
- * NO rompe nada aunque loadClientConfig no devuelva nada.
- */
 (function wrapLoadClientConfig() {
   if (typeof loadClientConfig !== "function") return;
   if (loadClientConfig.__wrapped) return;
 
   const _orig = loadClientConfig;
 
-  // helper interno
   function setClientGlobal(maybeResult) {
-    // buscamos por prioridad: return -> globals existentes -> {}.
     const candidate =
       (maybeResult && (maybeResult.cliente || maybeResult.client || maybeResult.config)) ||
       maybeResult ||
@@ -569,7 +572,6 @@ async function loadClientConfig() {
     try {
       setClientGlobal(res);
     } catch (e) {
-      // no cortamos la app por esto
       console.warn("No pude setear window.__client:", e);
     }
     return res;
@@ -599,7 +601,6 @@ function aplicarFiltro() {
     return;
   }
 
-  // IMPORTANTE: mostrar el primer lente del filtro sin "saltar"
   loadCurrentLens();
 }
 
@@ -680,39 +681,31 @@ const STORAGE_BUCKET = "facelens-assets";
 function getLensFolderForClient() {
   const c = window.__client || {};
 
-  // 1) prioridad: __client.slug
   const s1 = String(c.slug || "").trim();
   if (s1) return s1;
 
-  // 2) fallback: variable global "slug" (la que ya usás en el proyecto)
   const s2 = (typeof slug !== "undefined") ? String(slug || "").trim() : "";
   if (s2) return s2;
 
-  // 3) último fallback
   return "default";
 }
 
-// ✅ COMPAT: si en algún lugar quedó el nombre viejo, no rompe
 function getLensFolderForClientPrimary() {
   return getLensFolderForClient();
 }
 
-// Folder fallback (si no existe en slug)
 function getLensFolderFallback() {
-  // Podés cambiar "global" por el que estés usando
   return "global";
 }
 
-// Normaliza SKU tipo "100101", "SKU_100101", "100101 app" -> "100101"
 function normalizeSku(sku) {
   const s = String(sku || "").trim();
   if (!s) return "";
   const cleaned = s.replace(/\s+/g, "_");
-  const m = cleaned.match(/(\d{5,})/); // 100101, 100565, etc.
+  const m = cleaned.match(/(\d{5,})/);
   return m ? m[1] : cleaned;
 }
 
-// ✅ codifica cada parte del path (evita 400 por caracteres raros)
 function encodePathPreserveSlashes(path) {
   const clean = String(path || "").replace(/^\/+/, "");
   return clean
@@ -721,17 +714,14 @@ function encodePathPreserveSlashes(path) {
     .join("/");
 }
 
-// ✅ arma URL pública (con path seguro) + cache-bust opcional
 function buildPublicStorageUrl(pathInBucket) {
   const encodedPath = encodePathPreserveSlashes(pathInBucket);
   const base = `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${encodedPath}`;
 
-  // Si querés forzar recarga (útil en móvil): window.__ASSET_VER__ = "1"
   const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
   return ver ? `${base}?v=${encodeURIComponent(ver)}` : base;
 }
 
-// candidatos de paths para un SKU dentro de un folder
 function buildPathsForSku(folder, sku) {
   const basePath = `lentes/${folder}/`;
 
@@ -747,7 +737,6 @@ function buildPathsForSku(folder, sku) {
   };
 }
 
-// ✅ Detecto móvil “simple”
 function isMobileForAssets() {
   return (
     (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
@@ -755,17 +744,11 @@ function isMobileForAssets() {
   );
 }
 
-/* =========================
-   ✅ Carga imagen sin romper nada (CORS ROBUST para permitir CAPTURA)
-   - Primero: fetch -> blob -> objectURL (evita canvas "tainted" en móvil/PC)
-   - Fallback: Image() directo (puede taint, pero no rompe el render)
-========================= */
 async function loadImageSafe(url) {
   if (!url) return null;
 
   const u = String(url).trim();
 
-  // 1) Intento robusto: bajar como blob y convertir a blob: URL
   try {
     const res = await fetch(u, { mode: "cors", cache: "no-store" });
     if (!res.ok) throw new Error("fetch not ok: " + res.status);
@@ -782,24 +765,15 @@ async function loadImageSafe(url) {
       img.src = objectUrl;
     });
 
-    // liberar objectURL
     try { URL.revokeObjectURL(objectUrl); } catch {}
-
-    // decode opcional
     try { if (img.decode) await img.decode(); } catch {}
 
     if (img.naturalWidth > 0) return img;
 
-  } catch (e) {
-    // fetch puede fallar por CORS/headers/red
-    // console.warn("loadImageSafe fetch->blob falló:", e);
-  }
+  } catch (e) {}
 
-  // 2) Fallback: carga directa por URL pública
   return await new Promise((resolve) => {
     const img = new Image();
-
-    // ✅ IMPORTANTE: ahora SIEMPRE lo seteamos
     img.crossOrigin = "anonymous";
 
     img.onload = async () => {
@@ -814,31 +788,26 @@ async function loadImageSafe(url) {
   });
 }
 
-// Intenta detectar automáticamente 4/3/2/1 PNG en 2 folders (slug y fallback)
 async function loadLensAssets(lens) {
   const skuRaw = lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "";
   const sku = normalizeSku(skuRaw);
 
   const dbImg = String(lens?.imagen_url || "").trim();
 
-  // Sin SKU → imagen_url DB
   if (!sku) {
     const img = await loadImageSafe(dbImg);
     return { type: "single", single: img };
   }
 
-  // ✅ usá primary “real” (y si alguien llama al viejo, igual funciona)
   const folderPrimary = getLensFolderForClientPrimary();
   const folderFallback = getLensFolderFallback();
 
-  // armamos candidatos (primero slug, luego global)
   const foldersToTry = [folderPrimary];
   if (folderFallback && folderFallback !== folderPrimary) foldersToTry.push(folderFallback);
 
   for (const folder of foldersToTry) {
     const paths = buildPathsForSku(folder, sku);
 
-    // URLs
     const urlOne = buildPublicStorageUrl(paths.one);
     const urlFrame = buildPublicStorageUrl(paths.frame);
     const urlLens = buildPublicStorageUrl(paths.lens);
@@ -849,21 +818,18 @@ async function loadLensAssets(lens) {
     const urlLA = buildPublicStorageUrl(paths.leftArm);
     const urlRA = buildPublicStorageUrl(paths.rightArm);
 
-    // 1) Probar frame + lens
     const [frameBase, lensBase] = await Promise.all([
       loadImageSafe(urlFrame),
       loadImageSafe(urlLens),
     ]);
 
     if (frameBase && lensBase) {
-      // arms única
       const armsImg = await loadImageSafe(urlArms);
       if (armsImg) {
         console.log("ASSETS OK (four:arms)", { sku, folder, urlFrame, urlLens, urlArms });
         return { type: "four", frame: frameBase, lens: lensBase, arms: armsImg };
       }
 
-      // left/right
       const [tL, tR, aL, aR] = await Promise.all([
         loadImageSafe(urlLT),
         loadImageSafe(urlRT),
@@ -883,32 +849,23 @@ async function loadLensAssets(lens) {
       return { type: "two", frame: frameBase, lens: lensBase };
     }
 
-    // 2) fallback 1PNG
     const one = await loadImageSafe(urlOne);
     if (one) {
       console.log("ASSETS OK (single by sku)", { sku, folder, urlOne });
       return { type: "single", single: one };
     }
 
-    // si falló en este folder, probamos el siguiente
     console.warn("ASSETS FAIL in folder", { sku, folder });
   }
 
-  // 3) fallback final a imagen_url DB
   const dbFallback = await loadImageSafe(dbImg);
-  if (dbFallback) {
-    console.log("ASSETS OK (db fallback)", { sku, dbImg });
-  } else {
-    console.warn("ASSETS FAIL (all fallbacks)", { sku, dbImg });
-  }
+  if (dbFallback) console.log("ASSETS OK (db fallback)", { sku, dbImg });
+  else console.warn("ASSETS FAIL (all fallbacks)", { sku, dbImg });
+
   return { type: "single", single: dbFallback };
 }
 
-/* =========================
-   ✅ variables globales para el render (compatibles con lo actual)
-   (NO redeclaramos lensImgReady / lensImg, ya viven en bloque 3)
-========================= */
-let lensAssets = null; // {type:'single'|'two'|'four', ...}
+let lensAssets = null;
 
 async function loadCurrentLens() {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
@@ -920,9 +877,6 @@ async function loadCurrentLens() {
 
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
 
-  // =========================
-  // Botón "Ver producto" (Prioridad: Lente > Cliente > WhatsApp)
-  // =========================
   const urlLens = pickFirstUrl(lens);
   const urlCliente = getClientDefaultUrl();
   const waPhone = getClientWhatsApp();
@@ -956,9 +910,6 @@ async function loadCurrentLens() {
     console.warn("⚠️ No se encontró #productBtn en el DOM.");
   }
 
-  // =========================
-  // ✅ Imagen (multi-PNG con fallback)
-  // =========================
   lensImgReady = false;
   lensImg = null;
   lensAssets = null;
@@ -967,7 +918,6 @@ async function loadCurrentLens() {
     const assets = await loadLensAssets(lens);
     lensAssets = assets;
 
-    // compatibilidad: si es single, seteamos lensImg
     if (assets?.type === "single") {
       lensImg = assets.single || null;
     }
@@ -993,7 +943,6 @@ async function loadCurrentLens() {
   }
 }
 
-/* Navegación */
 prevBtn.onclick = () => {
   if (!lentesFiltrados || !lentesFiltrados.length) return;
   currentIndex = (currentIndex - 1 + lentesFiltrados.length) % lentesFiltrados.length;
@@ -1007,12 +956,9 @@ nextBtn.onclick = () => {
 };
 
 /* =========================
-   ✅ CAPTURA (móvil comparte / PC descarga sin ventana de "Compartir")
-   - PC: NO usa navigator.share (evita el popup de Windows)
-   - Móvil: share nativo si está disponible, si no descarga
+   ✅ CAPTURA (móvil comparte / PC descarga)
 ========================= */
 function isMobileForShare() {
-  // Queremos SHARE solo en móviles (evita ventana de compartir en PC)
   return (
     (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
     (navigator.maxTouchPoints && navigator.maxTouchPoints > 0 && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
@@ -1055,7 +1001,6 @@ async function doCapture() {
     const sku = normalizeSku(lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "");
     const filename = `facelens_${sku || "captura"}.png`;
 
-    // el canvas ya tiene video + overlay (AR) dibujado
     const blob = await canvasToBlobSafe(canvas);
 
     if (!blob) {
@@ -1063,12 +1008,9 @@ async function doCapture() {
       return;
     }
 
-    // ✅ SHARE SOLO EN MÓVIL
     if (isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
-
-        // canShare es opcional, si no existe intentamos igual
         const can = navigator.canShare ? navigator.canShare({ files: [file] }) : true;
 
         if (can) {
@@ -1077,14 +1019,11 @@ async function doCapture() {
             title: "FaceLens",
             text: "Mirá cómo me quedan estos lentes 😎",
           });
-          return; // listo
+          return;
         }
-      } catch (e) {
-        // si el share falla, caemos a descarga
-      }
+      } catch (e) {}
     }
 
-    // ✅ PC (y fallback): descarga directa, sin ventana
     downloadBlob(blob, filename);
 
   } catch (e) {
@@ -1093,11 +1032,11 @@ async function doCapture() {
   }
 }
 
-// Enganche del botón (sin romper si no existe)
 if (captureBtn) {
   captureBtn.onclick = () => { doCapture(); };
 }
-/* ========================= 
+
+/* =========================
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
 function startAR() {
@@ -1114,12 +1053,11 @@ function startAR() {
   });
 
   let smoothX = null, smoothY = null, smoothA = null;
-  let smoothD = null;   // eyeDist suavizado (px)
-  let smoothW = null;   // ancho final suavizado (px)
+  let smoothD = null;
+  let smoothW = null;
   const lerp = (a,b,t)=>a+(b-a)*t;
   const normAngle = (a)=>Math.atan2(Math.sin(a), Math.cos(a));
 
-  // Perfil dispositivo
   function isMobileDevice() {
     const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
     return (
@@ -1129,68 +1067,45 @@ function startAR() {
     );
   }
 
-  // Override opcional desde consola:
-  // window.__LENS_SCALE__ = 1.0 / 1.2 / 1.4 ...
-  function getLensScaleDefault() {
-    return isMobileDevice() ? 1.15 : 0.90;
-  }
+  function getLensScaleDefault() { return isMobileDevice() ? 1.15 : 0.90; }
   function getLensScale() {
     const v = Number(window.__LENS_SCALE__);
     return Number.isFinite(v) && v > 0 ? v : getLensScaleDefault();
   }
 
-  // Soft-clamp (suaviza límites, no “plancha” en seco)
   function softClamp(x, lo, hi) {
     if (x <= lo) return lo;
     if (x >= hi) return hi;
-    const t = (x - lo) / (hi - lo);         // 0..1
-    const s = t * t * (3 - 2 * t);          // smoothstep
+    const t = (x - lo) / (hi - lo);
+    const s = t * t * (3 - 2 * t);
     return lo + (hi - lo) * s;
   }
 
-  // Helpers
   function clamp01(x){ return Math.max(0, Math.min(1, x)); }
   function smoothstep01(t){ return t*t*(3 - 2*t); }
 
-  // Params por dispositivo (usa el mobile ya detectado, no recalcula)
   function getParams(mobile) {
     if (mobile) {
       return {
-        // Pose
         Tpos: 0.18,
-        // Suavizado de distancia
         Td: 0.14,
-        // Zoom smoothing
         Tw: 0.28,
-
-        // ✅ MÓVIL: multiplicador de eyeDistPx
         baseFactor: 1.90,
-
-        // Límites relativos al canvas
-        // minWRatio ok
         minWRatio: 0.16,
-
-        // ✅ FIX CLAVE: subir el techo.
-        // Antes 0.60 -> se clavaba en el máximo y “parecía” invertido al acercar.
         maxWRatio: 0.84,
-
-        // Freno "muy cerca" usando dRatio (smoothD/canvasW)
         nearStart: 0.18,
         nearEnd:   0.28,
         nearBrake: 0.74
       };
     }
 
-    // Desktop (NO TOCAR)
     return {
       Tpos: 0.18,
       Td: 0.16,
       Tw: 0.18,
-
       baseFactor: 1.85,
       minWpx: 110,
       maxWRatio: 0.30,
-
       nearStart: 0.18,
       nearEnd:   0.28,
       nearBrake: 0.78
@@ -1198,13 +1113,10 @@ function startAR() {
   }
 
   faceMesh.onResults((results) => {
-    // 1) Si no hay video listo, salir
     if (!video.videoWidth || !video.videoHeight) return;
 
-    // ✅ 2) Detectar si es móvil (UNA SOLA VEZ)
     const mobile = isMobileDevice();
 
-    // ✅ 3) Canvas estable en móvil (tamaño visible * DPR)
     if (mobile) {
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
@@ -1217,28 +1129,22 @@ function startAR() {
         canvas.height = ch;
       }
     } else {
-      // ✅ DESKTOP: como venía (NO TOCAR)
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
     }
 
-    // 4) Dibujar
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.drawImage(results.image, 0,0,canvas.width,canvas.height);
 
     const faces = results.multiFaceLandmarks;
     if (!faces || !faces.length) return;
 
-    // ✅ Capas SOLO si:
-    // - existe la función
-    // - y hay assets por capas cargados
     const canLayered =
       (typeof window.__drawARLayered === "function") &&
       (typeof lensAssets !== "undefined") &&
       lensAssets &&
       (lensAssets.type === "two" || lensAssets.type === "four");
 
-    // Fallback single PNG
     if (!canLayered) {
       if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
     }
@@ -1258,7 +1164,7 @@ function startAR() {
     const dx = rx - lx;
     const dy = ry - ly;
 
-    const eyeDistPx = Math.hypot(dx, dy); // ✅ métrica robusta
+    const eyeDistPx = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx);
 
     const targetX = nx;
@@ -1267,7 +1173,6 @@ function startAR() {
     const P = getParams(mobile);
     const scale = getLensScale();
 
-    // suavizado pose + distancia
     if (smoothX === null) {
       smoothX = targetX;
       smoothY = targetY;
@@ -1284,17 +1189,12 @@ function startAR() {
       smoothD = lerp(smoothD, eyeDistPx, P.Td);
     }
 
-    // =================
-    // ✅ ZOOM (móvil vs desktop)
-    // =================
     let desiredW;
     let minW, maxW;
 
     if (mobile) {
-      // ✅ MÓVIL: usar píxeles suavizados (smoothD)
       let baseW = smoothD * P.baseFactor * scale;
 
-      // Freno suave “muy cerca” (evita explosión al pegar la cara)
       const dRatio = smoothD / Math.max(1, canvas.width);
       const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
       const tNear = smoothstep01(clamp01(tNearRaw));
@@ -1306,22 +1206,7 @@ function startAR() {
 
       desiredW = softClamp(baseW, minW, maxW);
 
-      // Debug opcional (activar: window.__DBG_ZOOM__ = true)
-      if (window.__DBG_ZOOM__) {
-        window.__dbgN = (window.__dbgN || 0) + 1;
-        if (window.__dbgN % 15 === 0) {
-          console.log("[MOBILE ZOOM]", {
-            eyeDistPx: Math.round(eyeDistPx),
-            smoothD: Math.round(smoothD),
-            dRatio: +dRatio.toFixed(3),
-            baseW: Math.round(baseW),
-            desiredW: Math.round(desiredW)
-          });
-        }
-      }
-
     } else {
-      // ✅ DESKTOP: exactamente como venía (NO TOCAR)
       let baseW = smoothD * P.baseFactor * scale;
 
       const dRatio = smoothD / Math.max(1, canvas.width);
@@ -1337,26 +1222,18 @@ function startAR() {
       desiredW = softClamp(baseW, minW, maxW);
     }
 
-    // ✅ suavizado final del ancho (anti-temblor)
     if (smoothW === null) smoothW = desiredW;
     else smoothW = lerp(smoothW, desiredW, P.Tw);
 
     const targetW = smoothW;
 
-    // =================
-    // ✅ DIBUJO (capas con fallback)
-    // =================
     if (canLayered) {
       try {
         const res = window.__drawARLayered(ctx, { x: smoothX, y: smoothY, angle: smoothA, w: targetW });
-        // si devuelve false explícito, caemos al single
         if (res !== false) return;
-      } catch (e) {
-        // caemos al single sin romper
-      }
+      } catch (e) {}
     }
 
-    // fallback single
     if (!lensImgReady || !lensImg || lensImg.naturalWidth === 0) return;
 
     const aspect = lensImg.naturalHeight / lensImg.naturalWidth;
@@ -1377,48 +1254,49 @@ function startAR() {
 
   camera.start();
 }
+
 /* =========================
      INIT
-  ========================= */
-  (async function () {
-    try {
-      console.log("INIT ✅ arrancó");
+========================= */
+(async function () {
+  try {
+    console.log("INIT ✅ arrancó");
 
-      if (typeof loadClientConfig !== "function") {
-        throw new Error("loadClientConfig() no está definida");
-      }
-
-      if (typeof startAR !== "function") {
-        throw new Error("startAR() no está definida");
-      }
-
-      await loadClientConfig();
-      console.log("loadClientConfig ✅ OK");
-
-      if (typeof aplicarFiltro === "function") {
-        aplicarFiltro();
-        console.log("aplicarFiltro ✅ OK");
-      } else if (typeof loadCurrentLens === "function") {
-        loadCurrentLens();
-        console.log("loadCurrentLens (sin filtro) ✅ OK");
-      }
-
-      startAR();
-      console.log("startAR ✅ OK");
-
-    } catch (e) {
-      console.error("INIT ❌", e);
-      alert(e.message || String(e));
+    if (typeof loadClientConfig !== "function") {
+      throw new Error("loadClientConfig() no está definida");
     }
-  })();
-</script>
 
-<!-- ✅ Consola en el celular (ERUDA) -->
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>
-  eruda.init();
-  console.log("ERUDA ✅ lista");
-</script>
+    if (typeof startAR !== "function") {
+      throw new Error("startAR() no está definida");
+    }
+
+    await loadClientConfig();
+    console.log("loadClientConfig ✅ OK");
+
+    if (typeof aplicarFiltro === "function") {
+      aplicarFiltro();
+      console.log("aplicarFiltro ✅ OK");
+    } else if (typeof loadCurrentLens === "function") {
+      loadCurrentLens();
+      console.log("loadCurrentLens (sin filtro) ✅ OK");
+    }
+
+    startAR();
+    console.log("startAR ✅ OK");
+
+  } catch (e) {
+    console.error("INIT ❌", e);
+    alert(e.message || String(e));
+  }
+})();
+  </script>
+
+  <!-- ✅ Consola en el celular (ERUDA) -->
+  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+  <script>
+    eruda.init();
+    console.log("ERUDA ✅ lista");
+  </script>
 
 </body>
 </html>
