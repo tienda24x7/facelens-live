@@ -738,12 +738,17 @@ categoryFilter.onchange = aplicarFiltro;
 
 /* =========================
    5.5) BUSCADOR (LUPA) - usa lentesFiltrados
+   ⚠️ IMPORTANTE: NO redeclaramos searchBtn/searchOverlay/etc
+   porque ya existen en el BLOQUE 2) UI
 ========================= */
-const searchBtn = document.getElementById("searchBtn");
-const searchOverlay = document.getElementById("searchOverlay");
-const searchClose = document.getElementById("searchClose");
-const searchInput = document.getElementById("searchInput");
-const searchResults = document.getElementById("searchResults");
+
+// Si por algún motivo no existen los elementos del buscador, no rompemos la app
+const __hasSearchUI =
+  (typeof searchBtn !== "undefined" && searchBtn) &&
+  (typeof searchOverlay !== "undefined" && searchOverlay) &&
+  (typeof searchClose !== "undefined" && searchClose) &&
+  (typeof searchInput !== "undefined" && searchInput) &&
+  (typeof searchResults !== "undefined" && searchResults);
 
 function normTxt(s){
   return String(s || "")
@@ -762,24 +767,22 @@ function lensSku(l){
 }
 
 function openSearch(){
-  if (!searchOverlay) return;
+  if (!__hasSearchUI) return;
   searchOverlay.style.display = "flex";
   searchOverlay.setAttribute("aria-hidden", "false");
-  if (searchInput) {
-    searchInput.value = "";
-    setTimeout(() => searchInput.focus(), 50);
-  }
+  searchInput.value = "";
+  setTimeout(() => searchInput.focus(), 50);
   renderSearchResults("");
 }
 
 function closeSearch(){
-  if (!searchOverlay) return;
+  if (!__hasSearchUI) return;
   searchOverlay.style.display = "none";
   searchOverlay.setAttribute("aria-hidden", "true");
 }
 
 function renderSearchResults(q){
-  if (!searchResults) return;
+  if (!__hasSearchUI) return;
 
   const query = normTxt(q);
 
@@ -838,19 +841,17 @@ function renderSearchResults(q){
 }
 
 // wiring botones
-if (searchBtn) searchBtn.addEventListener("click", openSearch);
-if (searchClose) searchClose.addEventListener("click", closeSearch);
+if (__hasSearchUI) {
+  searchBtn.addEventListener("click", openSearch);
+  searchClose.addEventListener("click", closeSearch);
 
-// cerrar tocando afuera
-if (searchOverlay){
+  // cerrar tocando afuera
   searchOverlay.addEventListener("click", (e) => {
     if (e.target === searchOverlay) closeSearch();
   });
-}
 
-// input handler (con mini debounce)
-let __searchT = null;
-if (searchInput){
+  // input handler (con mini debounce)
+  let __searchT = null;
   searchInput.addEventListener("input", () => {
     clearTimeout(__searchT);
     __searchT = setTimeout(() => renderSearchResults(searchInput.value), 120);
@@ -865,11 +866,10 @@ if (searchInput){
 const _origAplicarFiltro = aplicarFiltro;
 aplicarFiltro = function(){
   _origAplicarFiltro();
-  if (searchOverlay && searchOverlay.style.display === "flex") {
-    renderSearchResults(searchInput?.value || "");
+  if (__hasSearchUI && searchOverlay.style.display === "flex") {
+    renderSearchResults(searchInput.value || "");
   }
 };
-
 /* =========================
    6) LENTES (carga imagen + botón producto)
 ========================= */
