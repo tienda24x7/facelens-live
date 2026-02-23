@@ -691,7 +691,7 @@ nextBtn.onclick = () => {
   loadCurrentLens().catch(err => console.warn("loadCurrentLens next error:", err));
 };
 
-/* =========================
+/* ========================= 
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
 function startAR() {
@@ -746,29 +746,29 @@ function startAR() {
   function clamp01(x){ return Math.max(0, Math.min(1, x)); }
   function smoothstep01(t){ return t*t*(3 - 2*t); }
 
-  // Params por dispositivo
-  function getParams() {
-    if (isMobileDevice()) {
+  // Params por dispositivo (usa el mobile ya detectado, no recalcula)
+  function getParams(mobile) {
+    if (mobile) {
       return {
         // Pose
         Tpos: 0.18,
-        // Suavizado de distancia (sí lo usamos para tamaño ahora)
+        // Suavizado de distancia
         Td: 0.14,
         // Zoom smoothing
         Tw: 0.28,
 
-        // ✅ MÓVIL (FIX): baseFactor vuelve a ser multiplicador de eyeDistPx (igual que desktop)
-        // Ajuste típico:
-        // - Si lo ves chico: subí a 2.1 / 2.3
-        // - Si lo ves grande: bajá a 1.7 / 1.6
+        // ✅ MÓVIL: multiplicador de eyeDistPx
         baseFactor: 1.90,
 
         // Límites relativos al canvas
+        // minWRatio ok
         minWRatio: 0.16,
-        maxWRatio: 0.60,
 
-        // ✅ Freno "muy cerca" usando dRatio (smoothD/canvasW), coherente y NO invertido
-        // dRatio sube cuando te acercás
+        // ✅ FIX CLAVE: subir el techo.
+        // Antes 0.60 -> se clavaba en el máximo y “parecía” invertido al acercar.
+        maxWRatio: 0.90,
+
+        // Freno "muy cerca" usando dRatio (smoothD/canvasW)
         nearStart: 0.18,
         nearEnd:   0.28,
         nearBrake: 0.78
@@ -792,11 +792,31 @@ function startAR() {
   }
 
   faceMesh.onResults((results) => {
+    // 1) Si no hay video listo, salir
     if (!video.videoWidth || !video.videoHeight) return;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // ✅ 2) Detectar si es móvil (UNA SOLA VEZ)
+    const mobile = isMobileDevice();
 
+    // ✅ 3) Canvas estable en móvil (tamaño visible * DPR)
+    if (mobile) {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      const cw = Math.max(1, Math.round(rect.width * dpr));
+      const ch = Math.max(1, Math.round(rect.height * dpr));
+
+      if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
+      }
+    } else {
+      // ✅ DESKTOP: como venía (NO TOCAR)
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+
+    // 4) Dibujar
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.drawImage(results.image, 0,0,canvas.width,canvas.height);
 
@@ -838,8 +858,7 @@ function startAR() {
     const targetX = nx;
     const targetY = ny + eyeDistPx * 0.06;
 
-    const mobile = isMobileDevice();
-    const P = getParams();
+    const P = getParams(mobile);
     const scale = getLensScale();
 
     // suavizado pose + distancia
@@ -866,12 +885,11 @@ function startAR() {
     let minW, maxW;
 
     if (mobile) {
-      // ✅ MÓVIL (FIX REAL): usar píxeles suavizados (smoothD) igual que desktop
-      // Esto garantiza: acercás => smoothD sube => lente sube (NO se invierte)
+      // ✅ MÓVIL: usar píxeles suavizados (smoothD)
       let baseW = smoothD * P.baseFactor * scale;
 
       // Freno suave “muy cerca” (evita explosión al pegar la cara)
-      const dRatio = smoothD / Math.max(1, canvas.width); // 0..~0.4 típico
+      const dRatio = smoothD / Math.max(1, canvas.width);
       const tNearRaw = (dRatio - P.nearStart) / (P.nearEnd - P.nearStart);
       const tNear = smoothstep01(clamp01(tNearRaw));
       const brake = 1 - tNear * (1 - P.nearBrake);
@@ -882,7 +900,7 @@ function startAR() {
 
       desiredW = softClamp(baseW, minW, maxW);
 
-      // Debug opcional (activar en consola: window.__DBG_ZOOM__ = true)
+      // Debug opcional (activar: window.__DBG_ZOOM__ = true)
       if (window.__DBG_ZOOM__) {
         window.__dbgN = (window.__dbgN || 0) + 1;
         if (window.__dbgN % 15 === 0) {
@@ -929,7 +947,6 @@ function startAR() {
         if (res !== false) return;
       } catch (e) {
         // caemos al single sin romper
-        // console.warn("__drawARLayered error:", e);
       }
     }
 
