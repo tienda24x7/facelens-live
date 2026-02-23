@@ -207,39 +207,65 @@ function pickLensId(row) {
    ✅ BRANDING helpers (logo + colores por cliente)
    - Soporta columnas sueltas (logo_url, primary_color, etc)
    - Soporta JSON en cliente.brand / cliente.branding / cliente.marca
+   - Soporta campos en español (color_primario, etc)
 ========================= */
+function cleanStr(v) {
+  return String(v || "").replace(/\r?\n/g, "").trim();
+}
+
 function getBrandFromClient(cliente) {
   const c = cliente || {};
   const b = c.brand || c.branding || c.marca || {}; // JSON opcional
 
   return {
-    name:
-      b.name || b.nombre || c.brand_name || c.nombre_marca || c.nombre || c.name || "",
+    name: cleanStr(
+      b.name || b.nombre || c.brand_name || c.nombre_marca || c.nombre || c.name || ""
+    ),
 
-    logoUrl:
-      b.logo_url || b.logoUrl || c.logo_url || c.brand_logo_url || c.logo || "",
+    // ✅ Limpia saltos de línea y espacios
+    logoUrl: cleanStr(
+      b.logo_url || b.logoUrl || c.logo_url || c.brand_logo_url || c.logo || ""
+    ),
 
     // Si guardás path en Storage (bucket público)
-    logoPath:
-      b.logo_path || b.logoPath || c.logo_path || c.brand_logo_path || "",
+    logoPath: cleanStr(
+      b.logo_path || b.logoPath || c.logo_path || c.brand_logo_path || ""
+    ),
 
-    logoBucket:
-      b.logo_bucket || c.logo_bucket || c.brand_logo_bucket || "branding",
+    logoBucket: cleanStr(
+      b.logo_bucket || c.logo_bucket || c.brand_logo_bucket || "branding"
+    ),
 
-    primary:
-      b.primary_color || b.primary || c.primary_color || c.brand_primary || "",
+    // ✅ Soporta campos en español reales de tu tabla
+    primary: cleanStr(
+      b.primary_color || b.primary ||
+      c.primary_color || c.brand_primary ||
+      c.color_primario || c.color_principal || ""
+    ),
 
-    surface:
-      b.surface_color || b.surface || c.surface_color || c.brand_surface || "",
+    surface: cleanStr(
+      b.surface_color || b.surface ||
+      c.surface_color || c.brand_surface ||
+      c.color_fondo_ui || c.color_surface || ""
+    ),
 
-    accent:
-      b.accent_color || b.accent || c.accent_color || c.brand_accent || "",
+    accent: cleanStr(
+      b.accent_color || b.accent ||
+      c.accent_color || c.brand_accent ||
+      c.color_acento || c.color_accent || ""
+    ),
 
-    muted:
-      b.muted_color || b.muted || c.muted_color || c.brand_muted || "",
+    muted: cleanStr(
+      b.muted_color || b.muted ||
+      c.muted_color || c.brand_muted ||
+      c.color_secundario || c.color_muted || ""
+    ),
 
-    onPrimary:
-      b.on_primary || b.text_on_primary || c.on_primary || c.brand_on_primary || ""
+    onPrimary: cleanStr(
+      b.on_primary || b.text_on_primary ||
+      c.on_primary || c.brand_on_primary ||
+      c.color_texto || c.color_texto_principal || ""
+    )
   };
 }
 
@@ -296,18 +322,26 @@ function applyBrandingFromClient(db, cliente) {
     }
 
     if (logoUrl) {
-      // cache bust para móviles
+      // cache bust para móviles + desktop
       const ver = window.__ASSET_VER__ ? `v=${window.__ASSET_VER__}` : `v=${Date.now()}`;
       const src = logoUrl.includes("?") ? `${logoUrl}&${ver}` : `${logoUrl}?${ver}`;
 
-      logoEl.onload = () => { logoEl.style.display = "inline-block"; };
+      logoEl.onload = () => {
+        logoEl.style.display = "inline-block";
+        const bar = document.getElementById("brandBar");
+        if (bar) bar.classList.add("hasBrand"); // si no existe CSS, no pasa nada
+      };
       logoEl.onerror = () => {
         console.warn("Logo no cargó:", logoUrl);
         logoEl.style.display = "none";
+        const bar = document.getElementById("brandBar");
+        if (bar) bar.classList.remove("hasBrand");
       };
       logoEl.src = src;
     } else {
       logoEl.style.display = "none";
+      const bar = document.getElementById("brandBar");
+      if (bar) bar.classList.remove("hasBrand");
     }
   }
 
@@ -416,7 +450,6 @@ async function loadClientConfig() {
 
   return { cliente, plan, lentes, mode };
 }
-
 /* =========================
    5) FILTRO
 ========================= */
