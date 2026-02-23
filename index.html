@@ -302,7 +302,7 @@
     </div>
   </div>
 
-  <div id="ui">
+ <div id="ui">
   <!-- Filtro -->
   <select id="categoryFilter" style="width:100%;">
     <option value="all">Todos</option>
@@ -330,7 +330,19 @@
   <!-- Acciones -->
   <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
     <button id="captureBtn" class="secondary">📸 Captura</button>
+
+    <!-- ✅ Comparar -->
+    <button id="compareABtn" class="secondary">⭐ Guardar A</button>
+    <button id="compareBBtn" class="secondary">⭐ Guardar B</button>
+
     <button id="productBtn" class="hidden">🛒 Ver producto</button>
+  </div>
+
+  <!-- ✅ Chips de comparación (se muestran cuando guardás A o B) -->
+  <div id="compareChips" style="margin-top:8px; display:none; gap:8px; flex-wrap:wrap;">
+    <button id="chipA" class="secondary" style="opacity:.92;">A: —</button>
+    <button id="chipB" class="secondary" style="opacity:.92;">B: —</button>
+    <button id="clearCompare" class="secondary" style="opacity:.75;">🗑️ Limpiar</button>
   </div>
 </div>
 
