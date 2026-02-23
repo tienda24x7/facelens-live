@@ -755,34 +755,60 @@ function isMobileForAssets() {
   );
 }
 
-// ✅ Carga imagen sin romper nada (fix móvil: NO crossOrigin + decode)
-function loadImageSafe(url) {
-  return new Promise((resolve) => {
-    if (!url) return resolve(null);
+/* =========================
+   ✅ Carga imagen sin romper nada (CORS ROBUST para permitir CAPTURA)
+   - Primero: fetch -> blob -> objectURL (evita canvas "tainted" en móvil/PC)
+   - Fallback: Image() directo (puede taint, pero no rompe el render)
+========================= */
+async function loadImageSafe(url) {
+  if (!url) return null;
 
-    const u = String(url).trim();
+  const u = String(url).trim();
+
+  // 1) Intento robusto: bajar como blob y convertir a blob: URL
+  try {
+    const res = await fetch(u, { mode: "cors", cache: "no-store" });
+    if (!res.ok) throw new Error("fetch not ok: " + res.status);
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
 
     const img = new Image();
+    img.crossOrigin = "anonymous";
 
-    // ✅ PC: mantenemos crossOrigin como antes
-    // ✅ Móvil: NO seteamos crossOrigin (Safari/Chrome móvil suelen fallar si lo ponés)
-    if (!isMobileForAssets()) {
-      img.crossOrigin = "anonymous";
-    }
+    await new Promise((resolve) => {
+      img.onload = resolve;
+      img.onerror = resolve;
+      img.src = objectUrl;
+    });
+
+    // liberar objectURL
+    try { URL.revokeObjectURL(objectUrl); } catch {}
+
+    // decode opcional
+    try { if (img.decode) await img.decode(); } catch {}
+
+    if (img.naturalWidth > 0) return img;
+
+  } catch (e) {
+    // fetch puede fallar por CORS/headers/red
+    // console.warn("loadImageSafe fetch->blob falló:", e);
+  }
+
+  // 2) Fallback: carga directa por URL pública
+  return await new Promise((resolve) => {
+    const img = new Image();
+
+    // ✅ IMPORTANTE: ahora SIEMPRE lo seteamos
+    img.crossOrigin = "anonymous";
 
     img.onload = async () => {
-      // ✅ Safari: a veces “carga” pero no dibuja bien si no decodificás
-      try {
-        if (img.decode) await img.decode();
-      } catch (e) {
-        // si decode falla, igual seguimos
-      }
+      try { if (img.decode) await img.decode(); } catch (e) {}
       resolve(img);
     };
 
     img.onerror = () => resolve(null);
 
-    // ✅ (Opcional) Si querés reventar cache en móvil: window.__ASSET_VER__ = String(Date.now())
     const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
     img.src = ver ? (u + (u.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(ver)) : u;
   });
@@ -979,7 +1005,6 @@ nextBtn.onclick = () => {
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens().catch(err => console.warn("loadCurrentLens next error:", err));
 };
-
 /* ========================= 
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
