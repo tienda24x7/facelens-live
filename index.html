@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>FaceLens Live</title>
 
+  <!-- ✅ Android browser UI color (se actualizará por JS si hay branding) -->
+  <meta name="theme-color" content="#0f0f0f" />
+
   <!-- MediaPipe -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -13,18 +16,73 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body { margin:0; background:#0f0f0f; color:#fff; font-family:Arial }
+    /* =========================
+       ✅ BRAND DEFAULT (no rompe nada)
+    ========================= */
+    :root{
+      --brand-primary: #0f0f0f;        /* fondo base */
+      --brand-surface: rgba(0,0,0,.60);/* panel UI */
+      --brand-accent: #ffffff;         /* acento (texto/botones) */
+      --brand-muted: #333333;          /* secundarios */
+      --brand-on-primary: #ffffff;     /* texto sobre primary/surface */
+    }
+
+    body { margin:0; background:var(--brand-primary); color:var(--brand-on-primary); font-family:Arial }
+
     #container { position:relative; width:100vw; height:100vh }
     video, canvas { position:absolute; width:100%; height:100%; object-fit:cover }
-    #ui { position:fixed; bottom:0; left:0; right:0; padding:12px; background:rgba(0,0,0,.60) }
+
+    /* ✅ Logo arriba (overlay seguro) */
+    #brandBar{
+      position:fixed;
+      top:0; left:0; right:0;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 12px;
+      pointer-events:none; /* no bloquea clicks */
+      z-index:10;
+    }
+    #brandLogo{
+      height:32px;
+      display:none; /* se muestra cuando carga */
+      pointer-events:none;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.55));
+    }
+    #brandTitle{
+      font-weight:bold;
+      opacity:.92;
+      text-shadow: 0 2px 6px rgba(0,0,0,.55);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:70vw;
+      display:none; /* opcional: se activa si hay nombre de marca */
+    }
+
+    #ui { position:fixed; bottom:0; left:0; right:0; padding:12px; background:var(--brand-surface); z-index:9 }
+
     button, select { padding:10px 12px; border:none; border-radius:10px; font-weight:bold; cursor:pointer }
-    button.secondary, select { background:#333; color:#fff }
+
+    /* ✅ Botón primario (si algún día lo usás) */
+    button.primary { background:var(--brand-accent); color:#000; }
+
+    /* ✅ Secundarios (como ya venías usando) */
+    button.secondary, select { background:var(--brand-muted); color:var(--brand-on-primary) }
+
     button.hidden { display:none }
+
     #modelName { flex:1; text-align:center; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
   </style>
 </head>
 
 <body>
+  <!-- ✅ BRAND BAR (no rompe nada, queda arriba) -->
+  <div id="brandBar">
+    <img id="brandLogo" alt="Logo" />
+    <div id="brandTitle"></div>
+  </div>
+
   <div id="container">
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
@@ -55,8 +113,8 @@
     </div>
   </div>
 
-  <script>
-  /* =========================
+  <script>  
+/* =========================
      0) SUPABASE
   ========================= */
 const SUPABASE_URL = "https://romgbrobvperljaviekj.supabase.co";
@@ -145,6 +203,117 @@ function pickLensId(row) {
   );
 }
 
+/* =========================
+   ✅ BRANDING helpers (logo + colores por cliente)
+   - Soporta columnas sueltas (logo_url, primary_color, etc)
+   - Soporta JSON en cliente.brand / cliente.branding / cliente.marca
+========================= */
+function getBrandFromClient(cliente) {
+  const c = cliente || {};
+  const b = c.brand || c.branding || c.marca || {}; // JSON opcional
+
+  return {
+    name:
+      b.name || b.nombre || c.brand_name || c.nombre_marca || c.nombre || c.name || "",
+
+    logoUrl:
+      b.logo_url || b.logoUrl || c.logo_url || c.brand_logo_url || c.logo || "",
+
+    // Si guardás path en Storage (bucket público)
+    logoPath:
+      b.logo_path || b.logoPath || c.logo_path || c.brand_logo_path || "",
+
+    logoBucket:
+      b.logo_bucket || c.logo_bucket || c.brand_logo_bucket || "branding",
+
+    primary:
+      b.primary_color || b.primary || c.primary_color || c.brand_primary || "",
+
+    surface:
+      b.surface_color || b.surface || c.surface_color || c.brand_surface || "",
+
+    accent:
+      b.accent_color || b.accent || c.accent_color || c.brand_accent || "",
+
+    muted:
+      b.muted_color || b.muted || c.muted_color || c.brand_muted || "",
+
+    onPrimary:
+      b.on_primary || b.text_on_primary || c.on_primary || c.brand_on_primary || ""
+  };
+}
+
+// Solo sirve si el bucket es PUBLIC
+function resolveLogoUrlFromStorage(db, bucket, path) {
+  try {
+    if (!db?.storage?.from || !bucket || !path) return "";
+    const { data } = db.storage.from(bucket).getPublicUrl(path);
+    return data?.publicUrl || "";
+  } catch {
+    return "";
+  }
+}
+
+function applyBrandingFromClient(db, cliente) {
+  const brand = getBrandFromClient(cliente);
+
+  // 1) Colores (CSS variables)
+  const root = document.documentElement;
+  if (brand.primary)   root.style.setProperty("--brand-primary", brand.primary);
+  if (brand.surface)   root.style.setProperty("--brand-surface", brand.surface);
+  if (brand.accent)    root.style.setProperty("--brand-accent", brand.accent);
+  if (brand.muted)     root.style.setProperty("--brand-muted", brand.muted);
+  if (brand.onPrimary) root.style.setProperty("--brand-on-primary", brand.onPrimary);
+
+  // 2) theme-color (Android barra superior)
+  if (brand.primary) {
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "theme-color");
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute("content", brand.primary);
+  }
+
+  // 3) Título (opcional)
+  const titleEl = document.getElementById("brandTitle");
+  if (titleEl) {
+    if (brand.name) {
+      titleEl.textContent = brand.name;
+      titleEl.style.display = "block";
+    } else {
+      titleEl.style.display = "none";
+    }
+  }
+
+  // 4) Logo
+  const logoEl = document.getElementById("brandLogo");
+  if (logoEl) {
+    let logoUrl = brand.logoUrl || "";
+    if (!logoUrl && brand.logoPath) {
+      logoUrl = resolveLogoUrlFromStorage(db, brand.logoBucket, brand.logoPath);
+    }
+
+    if (logoUrl) {
+      // cache bust para móviles
+      const ver = window.__ASSET_VER__ ? `v=${window.__ASSET_VER__}` : `v=${Date.now()}`;
+      const src = logoUrl.includes("?") ? `${logoUrl}&${ver}` : `${logoUrl}?${ver}`;
+
+      logoEl.onload = () => { logoEl.style.display = "inline-block"; };
+      logoEl.onerror = () => {
+        console.warn("Logo no cargó:", logoUrl);
+        logoEl.style.display = "none";
+      };
+      logoEl.src = src;
+    } else {
+      logoEl.style.display = "none";
+    }
+  }
+
+  console.log("BRANDING ✅ aplicado", brand);
+}
+
 async function loadClientConfig() {
   // =========================
   // 1) Cliente por slug
@@ -159,6 +328,10 @@ async function loadClientConfig() {
   if (!cData || cData.length === 0) throw new Error("No existe el cliente para slug: " + slug);
 
   cliente = cData[0];
+
+  // ✅ Branding (quirúrgico): aplica logo + colores apenas tenemos el cliente
+  window.__ASSET_VER__ = Date.now();
+  try { applyBrandingFromClient(db, cliente); } catch (e) { console.warn("Branding falló:", e); }
 
   // Guardar cliente global para que lo use el botón/whatsapp
   window.__client = cliente || {};
