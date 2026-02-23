@@ -1662,14 +1662,24 @@ function startAR() {
     alert(e.message || String(e));
   }
 })();
-  </script>
+ </script>
 
-  <!-- ✅ Consola en el celular (ERUDA) -->
-  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-  <script>
-    eruda.init();
-    console.log("ERUDA ✅ lista");
-  </script>
+<!-- ✅ ERUDA solo bajo demanda (no visible para usuarios) -->
+<script>
+  (function () {
+    const params = new URLSearchParams(location.search);
+    const debug = params.get("debug"); // activar con ?debug=1 o &debug=1
+    if (debug !== "1") return;
+
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/eruda";
+    s.onload = () => {
+      eruda.init();
+      console.log("ERUDA ✅ lista (debug=1)");
+    };
+    document.body.appendChild(s);
+  })();
+</script>
 
 </body>
 </html>
