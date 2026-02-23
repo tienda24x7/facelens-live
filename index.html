@@ -423,6 +423,16 @@ const searchOverlay = document.getElementById("searchOverlay");
 const searchClose = document.getElementById("searchClose");
 const searchInput = document.getElementById("searchInput");
 const searchResults = document.getElementById("searchResults");
+
+/* =========================
+   2.3) UI - COMPARAR (A/B)
+========================= */
+const compareABtn = document.getElementById("compareABtn");
+const compareBBtn = document.getElementById("compareBBtn");
+const compareChips = document.getElementById("compareChips");
+const chipA = document.getElementById("chipA");
+const chipB = document.getElementById("chipB");
+const clearCompare = document.getElementById("clearCompare");
 /* =========================
    3) ESTADO
 ========================= */
@@ -1218,6 +1228,93 @@ nextBtn.onclick = () => {
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens().catch(err => console.warn("loadCurrentLens next error:", err));
 };
+
+/* =========================
+   6.8) COMPARAR (A/B) - guarda dos modelos y permite volver
+========================= */
+let __compareA = null; // { idx, name, sku }
+let __compareB = null;
+
+function __getLensAtCurrentIndexSafe() {
+  if (!lentesFiltrados || !lentesFiltrados.length) return null;
+  const safeIndex =
+    ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
+  return { lens: lentesFiltrados[safeIndex], idx: safeIndex };
+}
+
+function __lensName(l) {
+  return String(l?.nombre_modelo || l?.nombre || "Modelo").trim();
+}
+
+function __lensSku(l) {
+  return String(l?.sku || l?.SKU || l?.codigo || l?.id_sku || "").trim();
+}
+
+function __updateCompareUI() {
+  if (typeof compareChips === "undefined" || !compareChips) return;
+  if (typeof chipA === "undefined" || !chipA) return;
+  if (typeof chipB === "undefined" || !chipB) return;
+
+  const hasA = !!__compareA;
+  const hasB = !!__compareB;
+
+  if (!hasA && !hasB) {
+    compareChips.style.display = "none";
+    return;
+  }
+
+  compareChips.style.display = "flex";
+  chipA.textContent = hasA ? `A: ${__compareA.name}` : "A: —";
+  chipB.textContent = hasB ? `B: ${__compareB.name}` : "B: —";
+
+  chipA.disabled = !hasA;
+  chipB.disabled = !hasB;
+
+  if (typeof clearCompare !== "undefined" && clearCompare) {
+    clearCompare.disabled = (!hasA && !hasB);
+  }
+}
+
+function __jumpToCompare(slot) {
+  const ref = slot === "A" ? __compareA : __compareB;
+  if (!ref) return;
+  currentIndex = ref.idx;
+  loadCurrentLens().catch(err => console.warn("loadCurrentLens compare jump error:", err));
+}
+
+function __saveCompare(slot) {
+  const cur = __getLensAtCurrentIndexSafe();
+  if (!cur || !cur.lens) return;
+
+  const payload = {
+    idx: cur.idx,
+    name: __lensName(cur.lens),
+    sku: __lensSku(cur.lens)
+  };
+
+  if (slot === "A") __compareA = payload;
+  else __compareB = payload;
+
+  __updateCompareUI();
+}
+
+// Wiring (si existen los botones)
+if (typeof compareABtn !== "undefined" && compareABtn) compareABtn.onclick = () => __saveCompare("A");
+if (typeof compareBBtn !== "undefined" && compareBBtn) compareBBtn.onclick = () => __saveCompare("B");
+
+if (typeof chipA !== "undefined" && chipA) chipA.onclick = () => __jumpToCompare("A");
+if (typeof chipB !== "undefined" && chipB) chipB.onclick = () => __jumpToCompare("B");
+
+if (typeof clearCompare !== "undefined" && clearCompare) {
+  clearCompare.onclick = () => {
+    __compareA = null;
+    __compareB = null;
+    __updateCompareUI();
+  };
+}
+
+// Al cargar por primera vez
+__updateCompareUI();
 
 /* =========================
    ✅ CAPTURA (móvil comparte / PC descarga)
