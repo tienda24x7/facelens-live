@@ -1007,95 +1007,95 @@ nextBtn.onclick = () => {
 };
 
 /* =========================
-   6.5) CAPTURA (móvil comparte / desktop descarga)
+   ✅ CAPTURA (móvil comparte / PC descarga sin ventana de "Compartir")
+   - PC: NO usa navigator.share (evita el popup de Windows)
+   - Móvil: share nativo si está disponible, si no descarga
 ========================= */
-
-// Detecto desktop “real”
-function isDesktopLike() {
-  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
-  const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
-  return !coarse && w > 820;
+function isMobileForShare() {
+  // Queremos SHARE solo en móviles (evita ventana de compartir en PC)
+  return (
+    (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
+    (navigator.maxTouchPoints && navigator.maxTouchPoints > 0 && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
+  );
 }
 
-function makeFileName() {
-  const sku =
-    normalizeSku(
-      (lentesFiltrados?.[currentIndex]?.sku) ||
-      (lentesFiltrados?.[currentIndex]?.SKU) ||
-      (lentesFiltrados?.[currentIndex]?.codigo) ||
-      ""
-    ) || "captura";
-  return `facelens_${sku}.png`;
+function getCurrentLensForFilename() {
+  if (!lentesFiltrados || !lentesFiltrados.length) return null;
+  const safeIndex =
+    ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
+  return lentesFiltrados[safeIndex] || null;
+}
+
+function canvasToBlobSafe(cnv) {
+  return new Promise((resolve) => {
+    try {
+      cnv.toBlob((b) => resolve(b || null), "image/png", 1.0);
+    } catch (e) {
+      resolve(null);
+    }
+  });
 }
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = filename || "facelens.png";
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => {
+    try { URL.revokeObjectURL(url); } catch {}
+  }, 1200);
 }
 
-async function tryCopyToClipboard(blob) {
+async function doCapture() {
   try {
-    if (!navigator.clipboard || !window.ClipboardItem) return false;
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-    return true;
-  } catch {
-    return false;
-  }
-}
+    const lens = getCurrentLensForFilename();
+    const sku = normalizeSku(lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "");
+    const filename = `facelens_${sku || "captura"}.png`;
 
-async function captureToBlob() {
-  return await new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob((blob) => {
-        if (!blob) return reject(new Error("No se pudo generar la imagen (blob null)."));
-        resolve(blob);
-      }, "image/png", 1.0);
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
+    // el canvas ya tiene video + overlay (AR) dibujado
+    const blob = await canvasToBlobSafe(canvas);
 
-async function handleCaptureClick() {
-  try {
-    const blob = await captureToBlob();
-    const fileName = makeFileName();
-    const file = new File([blob], fileName, { type: "image/png" });
-
-    // 📱 MÓVIL: share nativo
-    const canShareFiles = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }));
-    if (!isDesktopLike() && canShareFiles) {
-      await navigator.share({
-        files: [file],
-        title: "FaceLens",
-        text: "Mirá cómo me quedan 😎",
-      });
+    if (!blob) {
+      alert("No pude generar la captura (canvas bloqueado por CORS o no hay imagen aún).");
       return;
     }
 
-    // 💻 DESKTOP: descargar
-    downloadBlob(blob, fileName);
+    // ✅ SHARE SOLO EN MÓVIL
+    if (isMobileForShare() && navigator.share) {
+      try {
+        const file = new File([blob], filename, { type: "image/png" });
 
-    // opcional: copiar al portapapeles
-    const copied = await tryCopyToClipboard(blob);
-    if (copied) console.log("CAPTURA ✅ Copiada al portapapeles");
-    else console.log("CAPTURA ✅ Descargada");
+        // canShare es opcional, si no existe intentamos igual
+        const can = navigator.canShare ? navigator.canShare({ files: [file] }) : true;
+
+        if (can) {
+          await navigator.share({
+            files: [file],
+            title: "FaceLens",
+            text: "Mirá cómo me quedan estos lentes 😎",
+          });
+          return; // listo
+        }
+      } catch (e) {
+        // si el share falla, caemos a descarga
+      }
+    }
+
+    // ✅ PC (y fallback): descarga directa, sin ventana
+    downloadBlob(blob, filename);
 
   } catch (e) {
-    console.error("CAPTURA ❌", e);
-    alert("No se pudo capturar. Si vuelve a pasar, abrí consola y pegá el error.");
+    console.warn("Captura error:", e);
+    alert("No pude sacar la captura.");
   }
 }
 
-// Hook del botón captura
-if (typeof captureBtn !== "undefined" && captureBtn) {
-  captureBtn.onclick = handleCaptureClick;
+// Enganche del botón (sin romper si no existe)
+if (captureBtn) {
+  captureBtn.onclick = () => { doCapture(); };
 }
 /* ========================= 
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
