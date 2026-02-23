@@ -1005,6 +1005,98 @@ nextBtn.onclick = () => {
   currentIndex = (currentIndex + 1) % lentesFiltrados.length;
   loadCurrentLens().catch(err => console.warn("loadCurrentLens next error:", err));
 };
+
+/* =========================
+   6.5) CAPTURA (móvil comparte / desktop descarga)
+========================= */
+
+// Detecto desktop “real”
+function isDesktopLike() {
+  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
+  const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
+  return !coarse && w > 820;
+}
+
+function makeFileName() {
+  const sku =
+    normalizeSku(
+      (lentesFiltrados?.[currentIndex]?.sku) ||
+      (lentesFiltrados?.[currentIndex]?.SKU) ||
+      (lentesFiltrados?.[currentIndex]?.codigo) ||
+      ""
+    ) || "captura";
+  return `facelens_${sku}.png`;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function tryCopyToClipboard(blob) {
+  try {
+    if (!navigator.clipboard || !window.ClipboardItem) return false;
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function captureToBlob() {
+  return await new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) return reject(new Error("No se pudo generar la imagen (blob null)."));
+        resolve(blob);
+      }, "image/png", 1.0);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function handleCaptureClick() {
+  try {
+    const blob = await captureToBlob();
+    const fileName = makeFileName();
+    const file = new File([blob], fileName, { type: "image/png" });
+
+    // 📱 MÓVIL: share nativo
+    const canShareFiles = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }));
+    if (!isDesktopLike() && canShareFiles) {
+      await navigator.share({
+        files: [file],
+        title: "FaceLens",
+        text: "Mirá cómo me quedan 😎",
+      });
+      return;
+    }
+
+    // 💻 DESKTOP: descargar
+    downloadBlob(blob, fileName);
+
+    // opcional: copiar al portapapeles
+    const copied = await tryCopyToClipboard(blob);
+    if (copied) console.log("CAPTURA ✅ Copiada al portapapeles");
+    else console.log("CAPTURA ✅ Descargada");
+
+  } catch (e) {
+    console.error("CAPTURA ❌", e);
+    alert("No se pudo capturar. Si vuelve a pasar, abrí consola y pegá el error.");
+  }
+}
+
+// Hook del botón captura
+if (typeof captureBtn !== "undefined" && captureBtn) {
+  captureBtn.onclick = handleCaptureClick;
+}
 /* ========================= 
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
