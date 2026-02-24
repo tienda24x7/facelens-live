@@ -1329,10 +1329,7 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 __updateCompareUI();
 
 /* =========================
-   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)
-   - Genera una imagen final con overlay arriba
-   - Móvil: share nativo si está disponible
-   - PC: descarga directa
+   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)  [FIX: 2 líneas + QR]
 ========================= */
 
 // ✅ Share SOLO en móviles (evita ventana de compartir en PC)
@@ -1387,26 +1384,38 @@ function getCaptureLink(lens) {
   }
 }
 
-// ✅ Nombre modelo para overlay / filename
 function getCaptureModelName(lens) {
   return String(lens?.nombre_modelo || lens?.nombre || "Modelo").trim();
 }
 
-// ✅ Logo del cliente (desde window.__client)
 function getClientLogoUrlForCapture() {
   const c = window.__client || {};
-  // ojo: puede venir con saltos de línea; limpiamos
   return String(c.logo_url || c.logo || "").replace(/\r?\n/g, "").trim();
 }
 
-// ✅ Carga de imagen robusta para dibujar en canvas (logo / etc.)
+// ✅ Loader de imagen robusto (fix: soporta data:image/* sin fetch)
 async function loadImageForCapture(url) {
   const u = String(url || "").trim();
   if (!u) return null;
 
+  // ✅ Si es dataURL, cargamos directo (esto arregla el QR)
+  if (u.startsWith("data:image/")) {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = async () => {
+        try { if (img.decode) await img.decode(); } catch {}
+        resolve(img);
+      };
+      img.onerror = () => resolve(null);
+      img.src = u;
+    });
+  }
+
+  // ✅ URL normal: fetch->blob para evitar canvas "tainted"
   try {
     const res = await fetch(u, { mode: "cors", cache: "no-store" });
     if (!res.ok) return null;
+
     const blob = await res.blob();
     const objectUrl = URL.createObjectURL(blob);
 
@@ -1432,8 +1441,8 @@ async function loadImageForCapture(url) {
 // ✅ Loader del generador QR (solo cuando capturás)
 function ensureQrLibLoaded() {
   return new Promise((resolve) => {
-    // qrcode.min.js expone window.QRCode con toDataURL
-    if (window.QRCode && typeof window.QRCode.toDataURL === "function") return resolve(true);
+    // En el build browser de "qrcode", lo usual es window.QRCode.toDataURL
+    if (window.QRCode && (typeof window.QRCode.toDataURL === "function")) return resolve(true);
 
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js";
@@ -1443,9 +1452,79 @@ function ensureQrLibLoaded() {
   });
 }
 
+// ✅ Wrapper compatible: Promise o callback
+function qrToDataUrl(text, opts) {
+  return new Promise((resolve) => {
+    try {
+      if (!window.QRCode || typeof window.QRCode.toDataURL !== "function") return resolve("");
+
+      // si la lib soporta promesas
+      const maybe = window.QRCode.toDataURL(text, opts, (err, url) => {
+        if (err) return resolve("");
+        resolve(url || "");
+      });
+
+      // si devolvió promesa
+      if (maybe && typeof maybe.then === "function") {
+        maybe.then((url) => resolve(url || "")).catch(() => resolve(""));
+      }
+    } catch {
+      resolve("");
+    }
+  });
+}
+
+function isMobileDeviceForCaptureText() {
+  const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
+  return (
+    w <= 820 ||
+    window.matchMedia?.("(pointer: coarse)")?.matches ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  );
+}
+
+// ✅ Fit en 2 líneas (fix mobile)
+function fitTextTwoLines(ctx, text, maxWidth) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  if (!words.length) return ["", ""];
+
+  // si entra todo en 1 línea
+  if (ctx.measureText(text).width <= maxWidth) return [text, ""];
+
+  // armamos línea 1
+  let line1 = "";
+  let i = 0;
+  for (; i < words.length; i++) {
+    const test = line1 ? (line1 + " " + words[i]) : words[i];
+    if (ctx.measureText(test).width <= maxWidth) line1 = test;
+    else break;
+  }
+
+  // resto para línea 2
+  let line2 = words.slice(i).join(" ");
+  if (!line2) return [line1, ""];
+
+  // si línea 2 no entra, recortamos con ellipsis
+  if (ctx.measureText(line2).width > maxWidth) {
+    let s = line2;
+    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) {
+      s = s.slice(0, -1);
+    }
+    line2 = s + "…";
+  }
+
+  // si línea 1 quedó vacía (palabra enorme), recortamos a 1 línea con ellipsis
+  if (!line1) {
+    let s = String(text || "");
+    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
+    return [s + "…", ""];
+  }
+
+  return [line1, line2];
+}
+
 // ✅ Genera un canvas final: canvas actual + overlay (logo + texto + QR)
 async function buildBrandedCaptureCanvas() {
-  // base: el canvas actual ya tiene video + lente dibujado
   const baseW = canvas?.width || 0;
   const baseH = canvas?.height || 0;
   if (!baseW || !baseH) return null;
@@ -1454,104 +1533,91 @@ async function buildBrandedCaptureCanvas() {
   const modelName = getCaptureModelName(lens);
   const link = getCaptureLink(lens);
 
-  // canvas final
   const out = document.createElement("canvas");
   out.width = baseW;
   out.height = baseH;
   const octx = out.getContext("2d");
 
-  // 1) imagen base
+  // 1) base
   octx.drawImage(canvas, 0, 0, baseW, baseH);
 
-  // 2) overlay superior (barra)
-  const pad = Math.round(baseW * 0.025);           // 2.5% ancho
-  const barH = Math.round(baseH * 0.14);           // 14% alto
-  const x0 = 0;
-  const y0 = 0;
-
-  // fondo barra (semi-transparente)
+  // 2) barra
+  const pad = Math.round(baseW * 0.025);
+  const barH = Math.round(baseH * 0.16); // un toque más alta para 2 líneas
   octx.save();
   octx.fillStyle = "rgba(0,0,0,0.55)";
-  octx.fillRect(x0, y0, baseW, barH);
+  octx.fillRect(0, 0, baseW, barH);
 
-  // 3) logo (izquierda)
+  // 3) logo
   const logoUrl = getClientLogoUrlForCapture();
   let logoImg = null;
   if (logoUrl) logoImg = await loadImageForCapture(logoUrl);
 
   let logoW = 0, logoH = 0;
   if (logoImg) {
-    // altura logo ~60% de la barra
     logoH = Math.round(barH * 0.62);
     logoW = Math.round(logoImg.naturalWidth * (logoH / logoImg.naturalHeight));
     octx.drawImage(logoImg, pad, Math.round((barH - logoH)/2), logoW, logoH);
   }
 
-  // 4) QR (derecha)
+  // 4) QR
   const qrOk = await ensureQrLibLoaded();
+  const qrSize = Math.round(barH * 0.80);
   let qrDataUrl = "";
-  const qrSize = Math.round(barH * 0.80); // QR grande pero dentro de la barra
 
-  if (qrOk && window.QRCode && typeof window.QRCode.toDataURL === "function") {
-    try {
-      qrDataUrl = await window.QRCode.toDataURL(link, {
-        margin: 1,
-        width: qrSize,
-        errorCorrectionLevel: "M"
-      });
-    } catch {
-      qrDataUrl = "";
-    }
+  if (qrOk) {
+    qrDataUrl = await qrToDataUrl(link, { margin: 1, width: qrSize, errorCorrectionLevel: "M" });
   }
 
   let qrX = baseW - pad - qrSize;
   let qrY = Math.round((barH - qrSize) / 2);
 
   if (qrDataUrl) {
-    // fondo blanco para que el QR lea siempre
+    // fondo blanco
     octx.fillStyle = "rgba(255,255,255,0.92)";
     octx.fillRect(qrX - 6, qrY - 6, qrSize + 12, qrSize + 12);
 
-    const qrImg = await loadImageForCapture(qrDataUrl);
-    if (qrImg) {
-      octx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-    }
+    const qrImg = await loadImageForCapture(qrDataUrl); // ✅ ahora funciona
+    if (qrImg) octx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
   }
 
-  // 5) texto modelo (centro)
-  // área texto: entre logo y QR
+  // 5) texto (centro): 1 línea en desktop, 2 líneas en móvil
   const textLeft = pad + (logoW ? (logoW + pad) : 0);
   const textRight = qrDataUrl ? (qrX - pad) : (baseW - pad);
   const textW = Math.max(50, textRight - textLeft);
 
-  // font size relativo
-  const fontSize = Math.max(14, Math.round(barH * 0.22));
+  const mobile = isMobileDeviceForCaptureText();
+
+  const fontSize = Math.max(14, Math.round(barH * (mobile ? 0.20 : 0.22)));
   octx.font = `800 ${fontSize}px Arial`;
   octx.fillStyle = "rgba(255,255,255,0.95)";
   octx.textBaseline = "middle";
-
-  // recorte con ellipsis si es largo
-  function fitText(ctx, text, maxWidth) {
-    const t = String(text || "");
-    if (ctx.measureText(t).width <= maxWidth) return t;
-    let s = t;
-    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) {
-      s = s.slice(0, -1);
-    }
-    return s + "…";
-  }
-
-  const finalText = fitText(octx, modelName, textW);
-  const tx = textLeft;
-  const ty = Math.round(barH / 2);
-
-  // sombra suave para legibilidad
   octx.shadowColor = "rgba(0,0,0,0.55)";
   octx.shadowBlur = 6;
-  octx.fillText(finalText, tx, ty);
+
+  if (!mobile) {
+    // 1 línea desktop con ellipsis
+    let t = modelName;
+    if (octx.measureText(t).width > textW) {
+      while (t.length > 4 && octx.measureText(t + "…").width > textW) t = t.slice(0, -1);
+      t = t + "…";
+    }
+    octx.fillText(t, textLeft, Math.round(barH / 2));
+  } else {
+    // 2 líneas móvil
+    const [l1, l2] = fitTextTwoLines(octx, modelName, textW);
+    const lineGap = Math.round(fontSize * 0.95);
+    const centerY = Math.round(barH / 2);
+
+    if (l2) {
+      octx.fillText(l1, textLeft, centerY - Math.round(lineGap / 2));
+      octx.fillText(l2, textLeft, centerY + Math.round(lineGap / 2));
+    } else {
+      octx.fillText(l1, textLeft, centerY);
+    }
+  }
 
   octx.restore();
-
   return out;
 }
 
@@ -1573,7 +1639,6 @@ async function doCapture() {
       return;
     }
 
-    // ✅ SHARE SOLO EN MÓVIL
     if (isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
@@ -1587,12 +1652,9 @@ async function doCapture() {
           });
           return;
         }
-      } catch (e) {
-        // fallback a descarga
-      }
+      } catch (e) {}
     }
 
-    // ✅ PC (y fallback): descarga directa
     downloadBlob(blob, filename);
 
   } catch (e) {
