@@ -1329,7 +1329,7 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 __updateCompareUI();
 
 /* =========================
-   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)  [FIX: 2 líneas + QR robusto]
+   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)  [FIX: QR por imagen remota + no rompe móvil]
 ========================= */
 
 // ✅ Share SOLO en móviles (evita ventana de compartir en PC)
@@ -1398,7 +1398,7 @@ async function loadImageForCapture(url) {
   const u = String(url || "").trim();
   if (!u) return null;
 
-  // ✅ Si es dataURL, cargamos directo (QR / etc)
+  // data URL: directo
   if (u.startsWith("data:image/")) {
     return await new Promise((resolve) => {
       const img = new Image();
@@ -1411,7 +1411,7 @@ async function loadImageForCapture(url) {
     });
   }
 
-  // ✅ URL normal: fetch->blob para evitar canvas "tainted"
+  // URL normal: fetch->blob (evita canvas tainted)
   try {
     const res = await fetch(u, { mode: "cors", cache: "no-store" });
     if (!res.ok) return null;
@@ -1438,87 +1438,31 @@ async function loadImageForCapture(url) {
   }
 }
 
-// ✅ Loader del generador QR (solo cuando capturás)
-function ensureQrLibLoaded() {
-  return new Promise((resolve) => {
-    // Preferimos toCanvas; dejamos toDataURL como fallback
-    if (window.QRCode && (typeof window.QRCode.toCanvas === "function" || typeof window.QRCode.toDataURL === "function")) {
-      return resolve(true);
-    }
+/* =========================
+   ✅ QR por imagen remota (muy confiable)
+   - probamos 2 proveedores
+   - si falla, seguimos sin QR (NO rompe captura)
+========================= */
+function buildQrUrlProviders(text, sizePx) {
+  const t = encodeURIComponent(String(text || ""));
+  const s = Math.max(140, Math.min(420, Number(sizePx) || 220));
 
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js";
-    s.onload = () => resolve(true);
-    s.onerror = () => resolve(false);
-    document.head.appendChild(s);
-  });
+  // 1) qrserver (suele funcionar muy bien)
+  const u1 = `https://api.qrserver.com/v1/create-qr-code/?size=${s}x${s}&margin=2&data=${t}`;
+  // 2) quickchart (fallback)
+  const u2 = `https://quickchart.io/qr?size=${s}&text=${t}`;
+
+  return [u1, u2];
 }
 
-// ✅ Dibuja QR en canvas interno y lo pega al ctx final (lo más robusto)
-async function drawQrIntoContext(octx, text, x, y, size) {
-  try {
-    const ok = await ensureQrLibLoaded();
-    if (!ok || !window.QRCode) return false;
+async function loadQrImage(text, sizePx) {
+  const urls = buildQrUrlProviders(text, sizePx);
 
-    // 1) Preferimos toCanvas (más confiable)
-    if (typeof window.QRCode.toCanvas === "function") {
-      const qrCanvas = document.createElement("canvas");
-      qrCanvas.width = size;
-      qrCanvas.height = size;
-
-      const rendered = await new Promise((resolve) => {
-        const maybe = window.QRCode.toCanvas(
-          qrCanvas,
-          text,
-          { width: size, margin: 1, errorCorrectionLevel: "M" },
-          (err) => resolve(!err)
-        );
-        // soporte promesa
-        if (maybe && typeof maybe.then === "function") {
-          maybe.then(() => resolve(true)).catch(() => resolve(false));
-        }
-      });
-
-      if (!rendered) return false;
-
-      // fondo blanco para lectura
-      octx.fillStyle = "rgba(255,255,255,0.92)";
-      octx.fillRect(x - 6, y - 6, size + 12, size + 12);
-
-      octx.drawImage(qrCanvas, x, y, size, size);
-      return true;
-    }
-
-    // 2) Fallback: toDataURL
-    if (typeof window.QRCode.toDataURL === "function") {
-      let dataUrl = "";
-
-      const maybe = window.QRCode.toDataURL(
-        text,
-        { margin: 1, width: size, errorCorrectionLevel: "M" },
-        (err, url) => { if (!err) dataUrl = url || ""; }
-      );
-
-      if (maybe && typeof maybe.then === "function") {
-        dataUrl = await maybe.catch(() => "");
-      }
-
-      if (!dataUrl) return false;
-
-      octx.fillStyle = "rgba(255,255,255,0.92)";
-      octx.fillRect(x - 6, y - 6, size + 12, size + 12);
-
-      const qrImg = await loadImageForCapture(dataUrl);
-      if (!qrImg) return false;
-
-      octx.drawImage(qrImg, x, y, size, size);
-      return true;
-    }
-
-    return false;
-  } catch {
-    return false;
+  for (const u of urls) {
+    const img = await loadImageForCapture(u);
+    if (img && img.naturalWidth > 0) return img;
   }
+  return null;
 }
 
 function isMobileDeviceForCaptureText() {
@@ -1530,7 +1474,7 @@ function isMobileDeviceForCaptureText() {
   );
 }
 
-// ✅ Fit en 2 líneas (fix mobile)
+// ✅ Fit en 2 líneas (móvil)
 function fitTextTwoLines(ctx, text, maxWidth) {
   const words = String(text || "").split(/\s+/).filter(Boolean);
   if (!words.length) return ["", ""];
@@ -1600,21 +1544,28 @@ async function buildBrandedCaptureCanvas() {
     octx.drawImage(logoImg, pad, Math.round((barH - logoH)/2), logoW, logoH);
   }
 
-  // 4) QR (derecha) - FIX robusto con toCanvas
+  // 4) QR (derecha) - IMAGEN REMOTA (no rompe)
   const qrSize = Math.round(barH * 0.80);
   const qrX = baseW - pad - qrSize;
   const qrY = Math.round((barH - qrSize) / 2);
 
-  const drewQr = await drawQrIntoContext(octx, link, qrX, qrY, qrSize);
+  const qrImg = await loadQrImage(link, qrSize);
+  const hasQr = !!(qrImg && qrImg.naturalWidth > 0);
+
+  if (hasQr) {
+    octx.fillStyle = "rgba(255,255,255,0.92)";
+    octx.fillRect(qrX - 6, qrY - 6, qrSize + 12, qrSize + 12);
+    octx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+  }
 
   // 5) texto (centro)
   const textLeft = pad + (logoW ? (logoW + pad) : 0);
-  const textRight = drewQr ? (qrX - pad) : (baseW - pad);
+  const textRight = hasQr ? (qrX - pad) : (baseW - pad);
   const textW = Math.max(50, textRight - textLeft);
 
   const mobile = isMobileDeviceForCaptureText();
-
   const fontSize = Math.max(14, Math.round(barH * (mobile ? 0.20 : 0.22)));
+
   octx.font = `800 ${fontSize}px Arial`;
   octx.fillStyle = "rgba(255,255,255,0.95)";
   octx.textBaseline = "middle";
@@ -1663,6 +1614,7 @@ async function doCapture() {
       return;
     }
 
+    // ✅ SHARE SOLO EN MÓVIL
     if (isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
@@ -1676,9 +1628,12 @@ async function doCapture() {
           });
           return;
         }
-      } catch (e) {}
+      } catch (e) {
+        // si falla share, caemos a descarga
+      }
     }
 
+    // ✅ Fallback universal
     downloadBlob(blob, filename);
 
   } catch (e) {
