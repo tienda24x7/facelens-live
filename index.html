@@ -1558,9 +1558,29 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 __updateCompareUI();
 
 /* =========================
-   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)
-   FIX: en móvil share SOLO si canShare(files); si no, descarga + aviso
+   ✅ CAPTURA (BRANDEADA)
+   FIX DEFINITIVO MÓVIL:
+   - intenta share directo (como antes)
+   - si falla: abre la imagen en una pestaña para guardar/compartir
+   - PC: descarga normal
 ========================= */
+
+// ✅ Abrir imagen en pestaña (fallback ultra compatible en móvil)
+function openImageTabFromBlob(blob) {
+  try {
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    // si el popup fue bloqueado, avisamos
+    if (!w) {
+      alert("No pude abrir la imagen (popup bloqueado). Permití ventanas emergentes o probá abrir desde Chrome.");
+    }
+    // liberamos luego
+    setTimeout(() => {
+      try { URL.revokeObjectURL(url); } catch {}
+    }, 15000);
+  } catch (e) {}
+}
+
 async function doCapture() {
   try {
     const lens = getCurrentLensForFilename();
@@ -1583,32 +1603,31 @@ async function doCapture() {
       return;
     }
 
-    // ✅ MÓVIL: compartir SOLO si soporta archivos
+    // ✅ 1) MÓVIL: intentamos share DIRECTO (como cuando funcionaba)
     if (isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
-        const canFiles = navigator.canShare ? navigator.canShare({ files: [file] }) : false;
-
-        if (canFiles) {
-          await navigator.share({
-            files: [file],
-            title: "FaceLens",
-            text: "Mirá cómo me quedan estos lentes 😎",
-          });
-          return;
-        }
+        await navigator.share({
+          files: [file],
+          title: "FaceLens",
+          text: "Mirá cómo me quedan estos lentes 😎",
+        });
+        return; // listo
       } catch (e) {
-        // si share falla, caemos a descarga
+        // si falla share, seguimos a fallback
       }
     }
 
-    // ✅ Fallback universal: descarga
-    downloadBlob(blob, filename);
-
-    // ✅ En móvil la descarga puede “no avisar”
-    if (isMobileForShare()) {
-      alert("Captura guardada ✅ Revisá Descargas/Archivos para compartirla por WhatsApp.");
+    // ✅ 2) PC (o fallback): descarga normal
+    if (!isMobileForShare()) {
+      downloadBlob(blob, filename);
+      return;
     }
+
+    // ✅ 3) MÓVIL fallback definitivo:
+    // abrimos la imagen para que el usuario la guarde/comparta (funciona incluso si bloquean descargas)
+    openImageTabFromBlob(blob);
+    alert("Abrí la imagen ✅ Luego mantené apretado para Guardar/Compartir (WhatsApp).");
 
   } catch (e) {
     console.warn("Captura error:", e);
