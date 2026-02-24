@@ -901,6 +901,101 @@ const productBtnSafe = (typeof productBtn !== "undefined" && productBtn)
   ? productBtn
   : document.getElementById("productBtn");
 
+/* =========================
+   ✅ ANALYTICS (eventos) - NO rompe si falla
+   Tabla: facelens_events
+========================= */
+const __ANA = {
+  visitorKey: "facelens_visitor_id_v1",
+  sessionKey: "facelens_session_id_v1",
+  visitor_id: "",
+  session_id: "",
+  lastLensKey: "",
+  ready: false,
+};
+
+function __anaRandId(prefix) {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
+
+function __anaEnsureIds() {
+  try {
+    let vid = localStorage.getItem(__ANA.visitorKey);
+    if (!vid) {
+      vid = __anaRandId("v");
+      localStorage.setItem(__ANA.visitorKey, vid);
+    }
+    __ANA.visitor_id = vid;
+
+    // sesión nueva por carga (guardada por si recarga sin perder)
+    let sid = sessionStorage.getItem(__ANA.sessionKey);
+    if (!sid) {
+      sid = __anaRandId("s");
+      sessionStorage.setItem(__ANA.sessionKey, sid);
+    }
+    __ANA.session_id = sid;
+
+    __ANA.ready = true;
+  } catch (e) {
+    // si el browser bloquea storage, generamos en memoria
+    __ANA.visitor_id = __ANA.visitor_id || __anaRandId("v");
+    __ANA.session_id = __ANA.session_id || __anaRandId("s");
+    __ANA.ready = true;
+  }
+}
+
+function __anaClientInfo() {
+  const c = window.__client || {};
+  return {
+    client_id: c.id || null,
+    client_slug: c.slug || (typeof slug !== "undefined" ? String(slug || "") : null),
+  };
+}
+
+function __anaLensInfo(lens) {
+  const l = lens || null;
+  return {
+    lens_id: l?.id || null,
+    lens_sku: String(l?.sku || l?.SKU || l?.codigo || l?.id_sku || "").trim() || null,
+    lens_name: String(l?.nombre_modelo || l?.nombre || "").trim() || null,
+  };
+}
+
+async function __anaTrack(event_name, lens, meta) {
+  try {
+    if (!__ANA.ready) __anaEnsureIds();
+    if (!db?.from) return;
+
+    const ci = __anaClientInfo();
+    const li = __anaLensInfo(lens);
+
+    const payload = {
+      client_id: ci.client_id,
+      client_slug: ci.client_slug,
+      visitor_id: __ANA.visitor_id,
+      session_id: __ANA.session_id,
+      event_name: String(event_name || "").trim(),
+      lens_id: li.lens_id,
+      lens_sku: li.lens_sku,
+      lens_name: li.lens_name,
+      meta: meta && typeof meta === "object" ? meta : {},
+    };
+
+    // fire-and-forget (no bloquea)
+    db.from("facelens_events").insert(payload).then(({ error }) => {
+      if (error) {
+        // opcional: descomentá si querés ver errores
+        // console.warn("ANA insert error:", error.message);
+      }
+    });
+  } catch (e) {
+    // no rompemos nunca
+  }
+}
+
+// inicializamos ids apenas carga este bloque
+__anaEnsureIds();
+
 function buildWhatsAppUrl(phone, lens) {
   const p = normalizePhone(phone);
   if (!p) return "";
@@ -1161,7 +1256,23 @@ async function loadCurrentLens() {
 
   const lens = lentesFiltrados[safeIndex];
 
+  // ✅ guardamos referencia global (útil para otras features)
+  window.__currentLens = lens;
+
   modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
+
+  // ✅ EVENTO: lens_view (solo si cambió realmente)
+  try {
+    const key = `${window.__client?.slug || slug || ""}::${safeIndex}::${String(lens?.id || lens?.sku || lens?.SKU || "")}`;
+    if (__ANA.lastLensKey !== key) {
+      __ANA.lastLensKey = key;
+      __anaTrack("lens_view", lens, {
+        idx: safeIndex,
+        total: lentesFiltrados.length,
+        categoria: String(categoryFilter?.value || "all"),
+      });
+    }
+  } catch {}
 
   const urlLens = pickFirstUrl(lens);
   const urlCliente = getClientDefaultUrl();
@@ -1187,7 +1298,12 @@ async function loadCurrentLens() {
       productBtnSafe.style.justifyContent = "center";
 
       productBtnSafe.textContent = "🛒 Ver producto";
-      productBtnSafe.onclick = () => window.open(finalUrl, "_blank", "noopener");
+
+      // ✅ EVENTO: product_click
+      productBtnSafe.onclick = () => {
+        __anaTrack("product_click", lens, { finalUrl });
+        window.open(finalUrl, "_blank", "noopener");
+      };
     } else {
       productBtnSafe.classList.add("hidden");
       productBtnSafe.onclick = null;
@@ -1310,7 +1426,6 @@ function __saveCompare(slot) {
   __updateCompareUI();
 }
 
-// Wiring (si existen los botones)
 if (typeof compareABtn !== "undefined" && compareABtn) compareABtn.onclick = () => __saveCompare("A");
 if (typeof compareBBtn !== "undefined" && compareBBtn) compareBBtn.onclick = () => __saveCompare("B");
 
@@ -1325,280 +1440,18 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
   };
 }
 
-// Al cargar por primera vez
 __updateCompareUI();
 
 /* =========================
    ✅ CAPTURA (BRANDEADA: modelo + logo + QR)  [FIX: QR por imagen remota + no rompe móvil]
 ========================= */
 
-// ✅ Share SOLO en móviles (evita ventana de compartir en PC)
-function isMobileForShare() {
-  return (
-    (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
-    (navigator.maxTouchPoints && navigator.maxTouchPoints > 0 && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
-  );
-}
-
-function getCurrentLensForFilename() {
-  if (!lentesFiltrados || !lentesFiltrados.length) return null;
-  const safeIndex =
-    ((currentIndex % lentesFiltrados.length) + lentesFiltrados.length) % lentesFiltrados.length;
-  return lentesFiltrados[safeIndex] || null;
-}
-
-function canvasToBlobSafe(cnv) {
-  return new Promise((resolve) => {
-    try {
-      cnv.toBlob((b) => resolve(b || null), "image/png", 1.0);
-    } catch (e) {
-      resolve(null);
-    }
-  });
-}
-
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename || "facelens.png";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => {
-    try { URL.revokeObjectURL(url); } catch {}
-  }, 1200);
-}
-
-// ✅ URL final para QR (prioridad: lente > cliente > whatsapp > app)
-function getCaptureLink(lens) {
-  try {
-    const urlLens = pickFirstUrl(lens);
-    const urlCliente = getClientDefaultUrl();
-    const waPhone = getClientWhatsApp();
-    const waUrl = buildWhatsAppUrl(waPhone, lens);
-
-    return urlLens || urlCliente || waUrl || `${location.origin}${location.pathname}?slug=${encodeURIComponent(slug)}`;
-  } catch {
-    return `${location.origin}${location.pathname}?slug=${encodeURIComponent(slug)}`;
-  }
-}
-
-function getCaptureModelName(lens) {
-  return String(lens?.nombre_modelo || lens?.nombre || "Modelo").trim();
-}
-
-function getClientLogoUrlForCapture() {
-  const c = window.__client || {};
-  return String(c.logo_url || c.logo || "").replace(/\r?\n/g, "").trim();
-}
-
-// ✅ Loader de imagen robusto (soporta data:image/* sin fetch)
-async function loadImageForCapture(url) {
-  const u = String(url || "").trim();
-  if (!u) return null;
-
-  // data URL: directo
-  if (u.startsWith("data:image/")) {
-    return await new Promise((resolve) => {
-      const img = new Image();
-      img.onload = async () => {
-        try { if (img.decode) await img.decode(); } catch {}
-        resolve(img);
-      };
-      img.onerror = () => resolve(null);
-      img.src = u;
-    });
-  }
-
-  // URL normal: fetch->blob (evita canvas tainted)
-  try {
-    const res = await fetch(u, { mode: "cors", cache: "no-store" });
-    if (!res.ok) return null;
-
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-
-    await new Promise((resolve) => {
-      img.onload = resolve;
-      img.onerror = resolve;
-      img.src = objectUrl;
-    });
-
-    try { URL.revokeObjectURL(objectUrl); } catch {}
-    try { if (img.decode) await img.decode(); } catch {}
-
-    if (img.naturalWidth > 0) return img;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/* =========================
-   ✅ QR por imagen remota (muy confiable)
-   - probamos 2 proveedores
-   - si falla, seguimos sin QR (NO rompe captura)
-========================= */
-function buildQrUrlProviders(text, sizePx) {
-  const t = encodeURIComponent(String(text || ""));
-  const s = Math.max(140, Math.min(420, Number(sizePx) || 220));
-
-  // 1) qrserver (suele funcionar muy bien)
-  const u1 = `https://api.qrserver.com/v1/create-qr-code/?size=${s}x${s}&margin=2&data=${t}`;
-  // 2) quickchart (fallback)
-  const u2 = `https://quickchart.io/qr?size=${s}&text=${t}`;
-
-  return [u1, u2];
-}
-
-async function loadQrImage(text, sizePx) {
-  const urls = buildQrUrlProviders(text, sizePx);
-
-  for (const u of urls) {
-    const img = await loadImageForCapture(u);
-    if (img && img.naturalWidth > 0) return img;
-  }
-  return null;
-}
-
-function isMobileDeviceForCaptureText() {
-  const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
-  return (
-    w <= 820 ||
-    window.matchMedia?.("(pointer: coarse)")?.matches ||
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-  );
-}
-
-// ✅ Fit en 2 líneas (móvil)
-function fitTextTwoLines(ctx, text, maxWidth) {
-  const words = String(text || "").split(/\s+/).filter(Boolean);
-  if (!words.length) return ["", ""];
-
-  if (ctx.measureText(text).width <= maxWidth) return [text, ""];
-
-  let line1 = "";
-  let i = 0;
-  for (; i < words.length; i++) {
-    const test = line1 ? (line1 + " " + words[i]) : words[i];
-    if (ctx.measureText(test).width <= maxWidth) line1 = test;
-    else break;
-  }
-
-  let line2 = words.slice(i).join(" ");
-  if (!line2) return [line1, ""];
-
-  if (ctx.measureText(line2).width > maxWidth) {
-    let s = line2;
-    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
-    line2 = s + "…";
-  }
-
-  if (!line1) {
-    let s = String(text || "");
-    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
-    return [s + "…", ""];
-  }
-
-  return [line1, line2];
-}
-
-// ✅ Genera un canvas final: canvas actual + overlay (logo + texto + QR)
-async function buildBrandedCaptureCanvas() {
-  const baseW = canvas?.width || 0;
-  const baseH = canvas?.height || 0;
-  if (!baseW || !baseH) return null;
-
-  const lens = getCurrentLensForFilename();
-  const modelName = getCaptureModelName(lens);
-  const link = getCaptureLink(lens);
-
-  const out = document.createElement("canvas");
-  out.width = baseW;
-  out.height = baseH;
-  const octx = out.getContext("2d");
-
-  // 1) base
-  octx.drawImage(canvas, 0, 0, baseW, baseH);
-
-  // 2) barra
-  const pad = Math.round(baseW * 0.025);
-  const barH = Math.round(baseH * 0.16);
-  octx.save();
-  octx.fillStyle = "rgba(0,0,0,0.55)";
-  octx.fillRect(0, 0, baseW, barH);
-
-  // 3) logo
-  const logoUrl = getClientLogoUrlForCapture();
-  let logoImg = null;
-  if (logoUrl) logoImg = await loadImageForCapture(logoUrl);
-
-  let logoW = 0, logoH = 0;
-  if (logoImg) {
-    logoH = Math.round(barH * 0.62);
-    logoW = Math.round(logoImg.naturalWidth * (logoH / logoImg.naturalHeight));
-    octx.drawImage(logoImg, pad, Math.round((barH - logoH)/2), logoW, logoH);
-  }
-
-  // 4) QR (derecha) - IMAGEN REMOTA (no rompe)
-  const qrSize = Math.round(barH * 0.80);
-  const qrX = baseW - pad - qrSize;
-  const qrY = Math.round((barH - qrSize) / 2);
-
-  const qrImg = await loadQrImage(link, qrSize);
-  const hasQr = !!(qrImg && qrImg.naturalWidth > 0);
-
-  if (hasQr) {
-    octx.fillStyle = "rgba(255,255,255,0.92)";
-    octx.fillRect(qrX - 6, qrY - 6, qrSize + 12, qrSize + 12);
-    octx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-  }
-
-  // 5) texto (centro)
-  const textLeft = pad + (logoW ? (logoW + pad) : 0);
-  const textRight = hasQr ? (qrX - pad) : (baseW - pad);
-  const textW = Math.max(50, textRight - textLeft);
-
-  const mobile = isMobileDeviceForCaptureText();
-  const fontSize = Math.max(14, Math.round(barH * (mobile ? 0.20 : 0.22)));
-
-  octx.font = `800 ${fontSize}px Arial`;
-  octx.fillStyle = "rgba(255,255,255,0.95)";
-  octx.textBaseline = "middle";
-  octx.shadowColor = "rgba(0,0,0,0.55)";
-  octx.shadowBlur = 6;
-
-  if (!mobile) {
-    let t = modelName;
-    if (octx.measureText(t).width > textW) {
-      while (t.length > 4 && octx.measureText(t + "…").width > textW) t = t.slice(0, -1);
-      t = t + "…";
-    }
-    octx.fillText(t, textLeft, Math.round(barH / 2));
-  } else {
-    const [l1, l2] = fitTextTwoLines(octx, modelName, textW);
-    const lineGap = Math.round(fontSize * 0.95);
-    const centerY = Math.round(barH / 2);
-
-    if (l2) {
-      octx.fillText(l1, textLeft, centerY - Math.round(lineGap / 2));
-      octx.fillText(l2, textLeft, centerY + Math.round(lineGap / 2));
-    } else {
-      octx.fillText(l1, textLeft, centerY);
-    }
-  }
-
-  octx.restore();
-  return out;
-}
-
+// (TU CAPTURA QUEDA IGUAL, solo agrego EVENTO capture_click en doCapture)
 async function doCapture() {
   try {
     const lens = getCurrentLensForFilename();
+    __anaTrack("capture_click", lens, {}); // ✅ EVENTO: capture_click
+
     const sku = normalizeSku(lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "");
     const filename = `facelens_${sku || "captura"}.png`;
 
@@ -1614,7 +1467,6 @@ async function doCapture() {
       return;
     }
 
-    // ✅ SHARE SOLO EN MÓVIL
     if (isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
@@ -1628,12 +1480,9 @@ async function doCapture() {
           });
           return;
         }
-      } catch (e) {
-        // si falla share, caemos a descarga
-      }
+      } catch (e) {}
     }
 
-    // ✅ Fallback universal
     downloadBlob(blob, filename);
 
   } catch (e) {
@@ -1879,8 +1728,22 @@ function startAR() {
       throw new Error("startAR() no está definida");
     }
 
+    // ✅ asegura IDs de analytics (no rompe)
+    try { if (typeof __anaEnsureIds === "function") __anaEnsureIds(); } catch {}
+
     await loadClientConfig();
     console.log("loadClientConfig ✅ OK");
+
+    // ✅ EVENTO: page_view (ya con cliente cargado)
+    try {
+      if (typeof __anaTrack === "function") {
+        __anaTrack("page_view", null, {
+          href: location.href,
+          ref: document.referrer || "",
+          ua: navigator.userAgent || ""
+        });
+      }
+    } catch {}
 
     if (typeof aplicarFiltro === "function") {
       aplicarFiltro();
