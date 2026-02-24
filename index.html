@@ -1557,11 +1557,273 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 __updateCompareUI();
 
 /* =========================
-   ✅ CAPTURA (BRANDEADA)
+   ✅ CAPTURA (BRANDEADA) - AUTOCONTENIDA
    FIX ANDROID:
    - downscale en móvil (evita toBlob null / OOM)
    - fallback a toDataURL->Blob si toBlob falla
    - share directo en móvil; si falla, abre imagen
+   + incluye buildBrandedCaptureCanvas() (logo + modelo + QR)
+========================= */
+
+// ✅ Fallbacks (por si en tu proyecto no existen en otro bloque)
+function __cap_isMobileForShareFallback() {
+  return (
+    (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  );
+}
+const __cap_isMobileForShare = (typeof isMobileForShare === "function")
+  ? isMobileForShare
+  : __cap_isMobileForShareFallback;
+
+function __cap_downloadBlobFallback(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "facelens.png";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => {
+    try { URL.revokeObjectURL(url); } catch {}
+  }, 1200);
+}
+const __cap_downloadBlob = (typeof downloadBlob === "function")
+  ? downloadBlob
+  : __cap_downloadBlobFallback;
+
+function __cap_getCurrentLensFallback() {
+  return window.__currentLens || null;
+}
+const __cap_getCurrentLens = (typeof getCurrentLensForFilename === "function")
+  ? getCurrentLensForFilename
+  : __cap_getCurrentLensFallback;
+
+/* =========================
+   ✅ Helpers branding captura (logo + modelo + QR)
+========================= */
+
+// URL final para QR (prioridad: lente > cliente > whatsapp > app)
+function __cap_getCaptureLink(lens) {
+  try {
+    const urlLens = (typeof pickFirstUrl === "function") ? pickFirstUrl(lens) : "";
+    const urlCliente = (typeof getClientDefaultUrl === "function") ? getClientDefaultUrl() : "";
+    const waPhone = (typeof getClientWhatsApp === "function") ? getClientWhatsApp() : "";
+    const waUrl = (typeof buildWhatsAppUrl === "function") ? buildWhatsAppUrl(waPhone, lens) : "";
+
+    return (
+      urlLens ||
+      urlCliente ||
+      waUrl ||
+      `${location.origin}${location.pathname}?slug=${encodeURIComponent(typeof slug !== "undefined" ? slug : "")}`
+    );
+  } catch {
+    return `${location.origin}${location.pathname}?slug=${encodeURIComponent(typeof slug !== "undefined" ? slug : "")}`;
+  }
+}
+
+function __cap_getModelName(lens) {
+  return String(lens?.nombre_modelo || lens?.nombre || "Modelo").trim();
+}
+
+function __cap_getClientLogoUrl() {
+  const c = window.__client || {};
+  return String(c.logo_url || c.logo || "").replace(/\r?\n/g, "").trim();
+}
+
+// Loader robusto para captura (NO tainted): fetch->blob->objectURL
+async function __cap_loadImage(url) {
+  const u = String(url || "").trim();
+  if (!u) return null;
+
+  // data url directo
+  if (u.startsWith("data:image/")) {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = async () => {
+        try { if (img.decode) await img.decode(); } catch {}
+        resolve(img);
+      };
+      img.onerror = () => resolve(null);
+      img.src = u;
+    });
+  }
+
+  try {
+    const res = await fetch(u, { mode: "cors", cache: "no-store" });
+    if (!res.ok) return null;
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    await new Promise((resolve) => {
+      img.onload = resolve;
+      img.onerror = resolve;
+      img.src = objectUrl;
+    });
+
+    try { URL.revokeObjectURL(objectUrl); } catch {}
+    try { if (img.decode) await img.decode(); } catch {}
+
+    return img.naturalWidth > 0 ? img : null;
+  } catch {
+    return null;
+  }
+}
+
+// QR por imagen remota (muy confiable)
+function __cap_buildQrUrls(text, sizePx) {
+  const t = encodeURIComponent(String(text || ""));
+  const s = Math.max(140, Math.min(420, Number(sizePx) || 220));
+  const u1 = `https://api.qrserver.com/v1/create-qr-code/?size=${s}x${s}&margin=2&data=${t}`;
+  const u2 = `https://quickchart.io/qr?size=${s}&text=${t}`;
+  return [u1, u2];
+}
+
+async function __cap_loadQrImage(text, sizePx) {
+  const urls = __cap_buildQrUrls(text, sizePx);
+  for (const u of urls) {
+    const img = await __cap_loadImage(u);
+    if (img && img.naturalWidth > 0) return img;
+  }
+  return null;
+}
+
+function __cap_isMobileForCaptureText() {
+  const w = Math.min(window.innerWidth || 9999, (screen && screen.width) || 9999);
+  return (
+    w <= 820 ||
+    window.matchMedia?.("(pointer: coarse)")?.matches ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  );
+}
+
+// Fit en 2 líneas (móvil)
+function __cap_fitTextTwoLines(ctx, text, maxWidth) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  if (!words.length) return ["", ""];
+
+  if (ctx.measureText(text).width <= maxWidth) return [text, ""];
+
+  let line1 = "";
+  let i = 0;
+  for (; i < words.length; i++) {
+    const test = line1 ? (line1 + " " + words[i]) : words[i];
+    if (ctx.measureText(test).width <= maxWidth) line1 = test;
+    else break;
+  }
+
+  let line2 = words.slice(i).join(" ");
+  if (!line2) return [line1, ""];
+
+  if (ctx.measureText(line2).width > maxWidth) {
+    let s = line2;
+    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
+    line2 = s + "…";
+  }
+
+  if (!line1) {
+    let s = String(text || "");
+    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
+    return [s + "…", ""];
+  }
+
+  return [line1, line2];
+}
+
+// ✅ ESTA ES LA FUNCIÓN QUE TE FALTABA
+async function buildBrandedCaptureCanvas() {
+  const baseW = canvas?.width || 0;
+  const baseH = canvas?.height || 0;
+  if (!baseW || !baseH) return null;
+
+  const lens = __cap_getCurrentLens();
+  const modelName = __cap_getModelName(lens);
+  const link = __cap_getCaptureLink(lens);
+
+  const out = document.createElement("canvas");
+  out.width = baseW;
+  out.height = baseH;
+  const octx = out.getContext("2d");
+
+  // base (video + lente ya dibujado)
+  octx.drawImage(canvas, 0, 0, baseW, baseH);
+
+  // barra superior
+  const pad = Math.round(baseW * 0.025);
+  const barH = Math.round(baseH * 0.16); // un toque alta para 2 líneas
+  octx.save();
+  octx.fillStyle = "rgba(0,0,0,0.55)";
+  octx.fillRect(0, 0, baseW, barH);
+
+  // logo (izquierda)
+  const logoUrl = __cap_getClientLogoUrl();
+  const logoImg = logoUrl ? await __cap_loadImage(logoUrl) : null;
+
+  let logoW = 0, logoH = 0;
+  if (logoImg) {
+    logoH = Math.round(barH * 0.62);
+    logoW = Math.round(logoImg.naturalWidth * (logoH / logoImg.naturalHeight));
+    octx.drawImage(logoImg, pad, Math.round((barH - logoH) / 2), logoW, logoH);
+  }
+
+  // QR (derecha)
+  const qrSize = Math.round(barH * 0.80);
+  const qrX = baseW - pad - qrSize;
+  const qrY = Math.round((barH - qrSize) / 2);
+
+  const qrImg = await __cap_loadQrImage(link, qrSize);
+  const hasQr = !!(qrImg && qrImg.naturalWidth > 0);
+
+  if (hasQr) {
+    octx.fillStyle = "rgba(255,255,255,0.92)";
+    octx.fillRect(qrX - 6, qrY - 6, qrSize + 12, qrSize + 12);
+    octx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+  }
+
+  // texto centro
+  const textLeft = pad + (logoW ? (logoW + pad) : 0);
+  const textRight = hasQr ? (qrX - pad) : (baseW - pad);
+  const textW = Math.max(50, textRight - textLeft);
+
+  const mobile = __cap_isMobileForCaptureText();
+  const fontSize = Math.max(14, Math.round(barH * (mobile ? 0.20 : 0.22)));
+
+  octx.font = `800 ${fontSize}px Arial`;
+  octx.fillStyle = "rgba(255,255,255,0.95)";
+  octx.textBaseline = "middle";
+  octx.shadowColor = "rgba(0,0,0,0.55)";
+  octx.shadowBlur = 6;
+
+  if (!mobile) {
+    let t = modelName;
+    if (octx.measureText(t).width > textW) {
+      while (t.length > 4 && octx.measureText(t + "…").width > textW) t = t.slice(0, -1);
+      t = t + "…";
+    }
+    octx.fillText(t, textLeft, Math.round(barH / 2));
+  } else {
+    const [l1, l2] = __cap_fitTextTwoLines(octx, modelName, textW);
+    const lineGap = Math.round(fontSize * 0.95);
+    const centerY = Math.round(barH / 2);
+
+    if (l2) {
+      octx.fillText(l1, textLeft, centerY - Math.round(lineGap / 2));
+      octx.fillText(l2, textLeft, centerY + Math.round(lineGap / 2));
+    } else {
+      octx.fillText(l1, textLeft, centerY);
+    }
+  }
+
+  octx.restore();
+  return out;
+}
+
+/* =========================
+   ✅ FIX ANDROID (blob)
 ========================= */
 
 // ✅ Blob robusto: 1) toBlob 2) fallback toDataURL
@@ -1638,19 +1900,13 @@ function openImageTabFromBlob(blob) {
 
 async function doCapture() {
   try {
-    const lens = (typeof getCurrentLensForFilename === "function")
-      ? getCurrentLensForFilename()
-      : (window.__currentLens || null);
+    const lens = __cap_getCurrentLens();
 
     // ✅ EVENTO: capture_click
     try { __anaTrack("capture_click", lens, {}); } catch {}
 
     const sku = normalizeSku(lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "");
     const filename = `facelens_${sku || "captura"}.png`;
-
-    if (typeof buildBrandedCaptureCanvas !== "function") {
-      throw new Error("buildBrandedCaptureCanvas() no está definida");
-    }
 
     let brandedCanvas = await buildBrandedCaptureCanvas();
     if (!brandedCanvas) {
@@ -1659,11 +1915,9 @@ async function doCapture() {
     }
 
     // ✅ achicamos en móvil
-    try {
-      if (typeof isMobileForShare === "function" && isMobileForShare()) {
-        brandedCanvas = downscaleCanvasIfNeeded(brandedCanvas, 1280);
-      }
-    } catch {}
+    if (__cap_isMobileForShare()) {
+      brandedCanvas = downscaleCanvasIfNeeded(brandedCanvas, 1280);
+    }
 
     // 1) Intento normal
     let blob = await canvasToBlobSafe(brandedCanvas);
@@ -1679,7 +1933,7 @@ async function doCapture() {
     }
 
     // ✅ 1) MÓVIL: share directo
-    if (typeof isMobileForShare === "function" && isMobileForShare() && navigator.share) {
+    if (__cap_isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
         await navigator.share({
@@ -1694,8 +1948,8 @@ async function doCapture() {
     }
 
     // ✅ 2) PC: descarga
-    if (typeof isMobileForShare === "function" && !isMobileForShare()) {
-      downloadBlob(blob, filename);
+    if (!__cap_isMobileForShare()) {
+      __cap_downloadBlob(blob, filename);
       return;
     }
 
