@@ -1099,7 +1099,6 @@ async function __anaTrack(event_name, lens, meta) {
     // fire-and-forget (no bloquea)
     db.from("facelens_events").insert(payload).then(({ error }) => {
       if (error) {
-        // opcional: descomentá si querés ver errores
         // console.warn("ANA insert error:", error.message);
       }
     });
@@ -1559,22 +1558,78 @@ __updateCompareUI();
 
 /* =========================
    ✅ CAPTURA (BRANDEADA)
-   FIX DEFINITIVO MÓVIL:
-   - intenta share directo (como antes)
-   - si falla: abre la imagen en una pestaña para guardar/compartir
-   - PC: descarga normal
+   FIX ANDROID:
+   - downscale en móvil (evita toBlob null / OOM)
+   - fallback a toDataURL->Blob si toBlob falla
+   - share directo en móvil; si falla, abre imagen
 ========================= */
+
+// ✅ Blob robusto: 1) toBlob 2) fallback toDataURL
+function canvasToBlobSafe(cnv) {
+  return new Promise((resolve) => {
+    try {
+      if (!cnv || !cnv.toBlob) return resolve(null);
+      cnv.toBlob((b) => resolve(b || null), "image/png", 1.0);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+function dataUrlToBlob(dataURL) {
+  try {
+    const parts = String(dataURL || "").split(",");
+    if (parts.length < 2) return null;
+    const mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/png";
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) u8arr[n] = bstr.charCodeAt(n);
+    return new Blob([u8arr], { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+async function canvasToDataURLBlobSafe(cnv) {
+  try {
+    const dataURL = cnv.toDataURL("image/png");
+    return dataUrlToBlob(dataURL);
+  } catch {
+    return null;
+  }
+}
+
+function downscaleCanvasIfNeeded(cnv, maxSide) {
+  try {
+    const w = cnv?.width || 0;
+    const h = cnv?.height || 0;
+    if (!w || !h) return cnv;
+
+    const maxS = Number(maxSide) || 1280;
+    const bigger = Math.max(w, h);
+    if (bigger <= maxS) return cnv;
+
+    const scale = maxS / bigger;
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(w * scale));
+    out.height = Math.max(1, Math.round(h * scale));
+    const octx = out.getContext("2d");
+    octx.drawImage(cnv, 0, 0, out.width, out.height);
+    return out;
+  } catch {
+    return cnv;
+  }
+}
 
 // ✅ Abrir imagen en pestaña (fallback ultra compatible en móvil)
 function openImageTabFromBlob(blob) {
   try {
     const url = URL.createObjectURL(blob);
     const w = window.open(url, "_blank");
-    // si el popup fue bloqueado, avisamos
     if (!w) {
       alert("No pude abrir la imagen (popup bloqueado). Permití ventanas emergentes o probá abrir desde Chrome.");
     }
-    // liberamos luego
     setTimeout(() => {
       try { URL.revokeObjectURL(url); } catch {}
     }, 15000);
@@ -1583,7 +1638,9 @@ function openImageTabFromBlob(blob) {
 
 async function doCapture() {
   try {
-    const lens = getCurrentLensForFilename();
+    const lens = (typeof getCurrentLensForFilename === "function")
+      ? getCurrentLensForFilename()
+      : (window.__currentLens || null);
 
     // ✅ EVENTO: capture_click
     try { __anaTrack("capture_click", lens, {}); } catch {}
@@ -1591,20 +1648,38 @@ async function doCapture() {
     const sku = normalizeSku(lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "");
     const filename = `facelens_${sku || "captura"}.png`;
 
-    const brandedCanvas = await buildBrandedCaptureCanvas();
+    if (typeof buildBrandedCaptureCanvas !== "function") {
+      throw new Error("buildBrandedCaptureCanvas() no está definida");
+    }
+
+    let brandedCanvas = await buildBrandedCaptureCanvas();
     if (!brandedCanvas) {
       alert("Todavía no está lista la cámara para capturar.");
       return;
     }
 
-    const blob = await canvasToBlobSafe(brandedCanvas);
+    // ✅ achicamos en móvil
+    try {
+      if (typeof isMobileForShare === "function" && isMobileForShare()) {
+        brandedCanvas = downscaleCanvasIfNeeded(brandedCanvas, 1280);
+      }
+    } catch {}
+
+    // 1) Intento normal
+    let blob = await canvasToBlobSafe(brandedCanvas);
+
+    // 2) Fallback Android
     if (!blob) {
-      alert("No pude generar la captura (bloqueo del navegador).");
+      blob = await canvasToDataURLBlobSafe(brandedCanvas);
+    }
+
+    if (!blob) {
+      alert("No pude generar la captura (limitación del navegador).");
       return;
     }
 
-    // ✅ 1) MÓVIL: intentamos share DIRECTO (como cuando funcionaba)
-    if (isMobileForShare() && navigator.share) {
+    // ✅ 1) MÓVIL: share directo
+    if (typeof isMobileForShare === "function" && isMobileForShare() && navigator.share) {
       try {
         const file = new File([blob], filename, { type: "image/png" });
         await navigator.share({
@@ -1612,26 +1687,25 @@ async function doCapture() {
           title: "FaceLens",
           text: "Mirá cómo me quedan estos lentes 😎",
         });
-        return; // listo
+        return;
       } catch (e) {
-        // si falla share, seguimos a fallback
+        // si falla share, caemos al fallback
       }
     }
 
-    // ✅ 2) PC (o fallback): descarga normal
-    if (!isMobileForShare()) {
+    // ✅ 2) PC: descarga
+    if (typeof isMobileForShare === "function" && !isMobileForShare()) {
       downloadBlob(blob, filename);
       return;
     }
 
-    // ✅ 3) MÓVIL fallback definitivo:
-    // abrimos la imagen para que el usuario la guarde/comparta (funciona incluso si bloquean descargas)
+    // ✅ 3) Móvil fallback: abrir imagen
     openImageTabFromBlob(blob);
     alert("Abrí la imagen ✅ Luego mantené apretado para Guardar/Compartir (WhatsApp).");
 
   } catch (e) {
     console.warn("Captura error:", e);
-    alert("No pude sacar la captura.");
+    alert("No pude sacar la captura. Error: " + (e?.message || String(e)));
   }
 }
 
