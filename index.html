@@ -1329,7 +1329,7 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 __updateCompareUI();
 
 /* =========================
-   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)  [FIX: 2 líneas + QR]
+   ✅ CAPTURA (BRANDEADA: modelo + logo + QR)  [FIX: 2 líneas + QR robusto]
 ========================= */
 
 // ✅ Share SOLO en móviles (evita ventana de compartir en PC)
@@ -1393,12 +1393,12 @@ function getClientLogoUrlForCapture() {
   return String(c.logo_url || c.logo || "").replace(/\r?\n/g, "").trim();
 }
 
-// ✅ Loader de imagen robusto (fix: soporta data:image/* sin fetch)
+// ✅ Loader de imagen robusto (soporta data:image/* sin fetch)
 async function loadImageForCapture(url) {
   const u = String(url || "").trim();
   if (!u) return null;
 
-  // ✅ Si es dataURL, cargamos directo (esto arregla el QR)
+  // ✅ Si es dataURL, cargamos directo (QR / etc)
   if (u.startsWith("data:image/")) {
     return await new Promise((resolve) => {
       const img = new Image();
@@ -1441,8 +1441,10 @@ async function loadImageForCapture(url) {
 // ✅ Loader del generador QR (solo cuando capturás)
 function ensureQrLibLoaded() {
   return new Promise((resolve) => {
-    // En el build browser de "qrcode", lo usual es window.QRCode.toDataURL
-    if (window.QRCode && (typeof window.QRCode.toDataURL === "function")) return resolve(true);
+    // Preferimos toCanvas; dejamos toDataURL como fallback
+    if (window.QRCode && (typeof window.QRCode.toCanvas === "function" || typeof window.QRCode.toDataURL === "function")) {
+      return resolve(true);
+    }
 
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js";
@@ -1452,26 +1454,71 @@ function ensureQrLibLoaded() {
   });
 }
 
-// ✅ Wrapper compatible: Promise o callback
-function qrToDataUrl(text, opts) {
-  return new Promise((resolve) => {
-    try {
-      if (!window.QRCode || typeof window.QRCode.toDataURL !== "function") return resolve("");
+// ✅ Dibuja QR en canvas interno y lo pega al ctx final (lo más robusto)
+async function drawQrIntoContext(octx, text, x, y, size) {
+  try {
+    const ok = await ensureQrLibLoaded();
+    if (!ok || !window.QRCode) return false;
 
-      // si la lib soporta promesas
-      const maybe = window.QRCode.toDataURL(text, opts, (err, url) => {
-        if (err) return resolve("");
-        resolve(url || "");
+    // 1) Preferimos toCanvas (más confiable)
+    if (typeof window.QRCode.toCanvas === "function") {
+      const qrCanvas = document.createElement("canvas");
+      qrCanvas.width = size;
+      qrCanvas.height = size;
+
+      const rendered = await new Promise((resolve) => {
+        const maybe = window.QRCode.toCanvas(
+          qrCanvas,
+          text,
+          { width: size, margin: 1, errorCorrectionLevel: "M" },
+          (err) => resolve(!err)
+        );
+        // soporte promesa
+        if (maybe && typeof maybe.then === "function") {
+          maybe.then(() => resolve(true)).catch(() => resolve(false));
+        }
       });
 
-      // si devolvió promesa
-      if (maybe && typeof maybe.then === "function") {
-        maybe.then((url) => resolve(url || "")).catch(() => resolve(""));
-      }
-    } catch {
-      resolve("");
+      if (!rendered) return false;
+
+      // fondo blanco para lectura
+      octx.fillStyle = "rgba(255,255,255,0.92)";
+      octx.fillRect(x - 6, y - 6, size + 12, size + 12);
+
+      octx.drawImage(qrCanvas, x, y, size, size);
+      return true;
     }
-  });
+
+    // 2) Fallback: toDataURL
+    if (typeof window.QRCode.toDataURL === "function") {
+      let dataUrl = "";
+
+      const maybe = window.QRCode.toDataURL(
+        text,
+        { margin: 1, width: size, errorCorrectionLevel: "M" },
+        (err, url) => { if (!err) dataUrl = url || ""; }
+      );
+
+      if (maybe && typeof maybe.then === "function") {
+        dataUrl = await maybe.catch(() => "");
+      }
+
+      if (!dataUrl) return false;
+
+      octx.fillStyle = "rgba(255,255,255,0.92)";
+      octx.fillRect(x - 6, y - 6, size + 12, size + 12);
+
+      const qrImg = await loadImageForCapture(dataUrl);
+      if (!qrImg) return false;
+
+      octx.drawImage(qrImg, x, y, size, size);
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function isMobileDeviceForCaptureText() {
@@ -1488,10 +1535,8 @@ function fitTextTwoLines(ctx, text, maxWidth) {
   const words = String(text || "").split(/\s+/).filter(Boolean);
   if (!words.length) return ["", ""];
 
-  // si entra todo en 1 línea
   if (ctx.measureText(text).width <= maxWidth) return [text, ""];
 
-  // armamos línea 1
   let line1 = "";
   let i = 0;
   for (; i < words.length; i++) {
@@ -1500,20 +1545,15 @@ function fitTextTwoLines(ctx, text, maxWidth) {
     else break;
   }
 
-  // resto para línea 2
   let line2 = words.slice(i).join(" ");
   if (!line2) return [line1, ""];
 
-  // si línea 2 no entra, recortamos con ellipsis
   if (ctx.measureText(line2).width > maxWidth) {
     let s = line2;
-    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) {
-      s = s.slice(0, -1);
-    }
+    while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
     line2 = s + "…";
   }
 
-  // si línea 1 quedó vacía (palabra enorme), recortamos a 1 línea con ellipsis
   if (!line1) {
     let s = String(text || "");
     while (s.length > 4 && ctx.measureText(s + "…").width > maxWidth) s = s.slice(0, -1);
@@ -1543,7 +1583,7 @@ async function buildBrandedCaptureCanvas() {
 
   // 2) barra
   const pad = Math.round(baseW * 0.025);
-  const barH = Math.round(baseH * 0.16); // un toque más alta para 2 líneas
+  const barH = Math.round(baseH * 0.16);
   octx.save();
   octx.fillStyle = "rgba(0,0,0,0.55)";
   octx.fillRect(0, 0, baseW, barH);
@@ -1560,30 +1600,16 @@ async function buildBrandedCaptureCanvas() {
     octx.drawImage(logoImg, pad, Math.round((barH - logoH)/2), logoW, logoH);
   }
 
-  // 4) QR
-  const qrOk = await ensureQrLibLoaded();
+  // 4) QR (derecha) - FIX robusto con toCanvas
   const qrSize = Math.round(barH * 0.80);
-  let qrDataUrl = "";
+  const qrX = baseW - pad - qrSize;
+  const qrY = Math.round((barH - qrSize) / 2);
 
-  if (qrOk) {
-    qrDataUrl = await qrToDataUrl(link, { margin: 1, width: qrSize, errorCorrectionLevel: "M" });
-  }
+  const drewQr = await drawQrIntoContext(octx, link, qrX, qrY, qrSize);
 
-  let qrX = baseW - pad - qrSize;
-  let qrY = Math.round((barH - qrSize) / 2);
-
-  if (qrDataUrl) {
-    // fondo blanco
-    octx.fillStyle = "rgba(255,255,255,0.92)";
-    octx.fillRect(qrX - 6, qrY - 6, qrSize + 12, qrSize + 12);
-
-    const qrImg = await loadImageForCapture(qrDataUrl); // ✅ ahora funciona
-    if (qrImg) octx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-  }
-
-  // 5) texto (centro): 1 línea en desktop, 2 líneas en móvil
+  // 5) texto (centro)
   const textLeft = pad + (logoW ? (logoW + pad) : 0);
-  const textRight = qrDataUrl ? (qrX - pad) : (baseW - pad);
+  const textRight = drewQr ? (qrX - pad) : (baseW - pad);
   const textW = Math.max(50, textRight - textLeft);
 
   const mobile = isMobileDeviceForCaptureText();
@@ -1596,7 +1622,6 @@ async function buildBrandedCaptureCanvas() {
   octx.shadowBlur = 6;
 
   if (!mobile) {
-    // 1 línea desktop con ellipsis
     let t = modelName;
     if (octx.measureText(t).width > textW) {
       while (t.length > 4 && octx.measureText(t + "…").width > textW) t = t.slice(0, -1);
@@ -1604,7 +1629,6 @@ async function buildBrandedCaptureCanvas() {
     }
     octx.fillText(t, textLeft, Math.round(barH / 2));
   } else {
-    // 2 líneas móvil
     const [l1, l2] = fitTextTwoLines(octx, modelName, textW);
     const lineGap = Math.round(fontSize * 0.95);
     const centerY = Math.round(barH / 2);
