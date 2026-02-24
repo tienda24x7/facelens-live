@@ -267,6 +267,65 @@
     opacity:.78;
     font-size:13px;
   }
+
+  /* =========================
+     ✅ DASHBOARD styles
+  ========================= */
+  #dashPage{
+    position:fixed;
+    inset:0;
+    z-index:9998;
+    background:#0f0f0f;
+    color:#fff;
+    padding:14px;
+    overflow:auto;
+  }
+
+  #dashTop{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:12px;
+    padding:10px 12px;
+    border-radius:14px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.08);
+  }
+
+  #dashGrid{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:10px;
+  }
+
+  @media (min-width: 900px){
+    #dashGrid{ grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+
+  .dashCard{
+    border-radius:14px;
+    padding:12px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.08);
+  }
+
+  .dashLabel{ font-size:12px; opacity:.85; }
+  .dashValue{ font-size:22px; font-weight:900; margin-top:4px; }
+  .dashHint{ font-size:12px; opacity:.75; margin-top:2px; }
+
+  .dashList{ margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+  .dashRow{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px;
+    border-radius:12px;
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(255,255,255,.06);
+  }
+  .dashRow b{ font-weight:800; }
+  .dashRow small{ opacity:.75; }
 </style>
 </head>
 
@@ -363,6 +422,62 @@
 
     <div id="searchResults"></div>
   </div>
+</div>
+<!-- =========================
+     ✅ DASHBOARD (solo si dashboard=1)
+========================= -->
+<div id="dashPage" style="display:none;">
+  <div id="dashTop">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <img id="dashLogo" alt="Logo" style="height:34px; display:none; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));"/>
+      <div>
+        <div id="dashTitle" style="font-weight:900; font-size:16px;">Dashboard</div>
+        <div id="dashSub" style="opacity:.85; font-size:12px;">Cargando…</div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center;">
+      <select id="dashRange" class="secondary" style="padding:8px 10px; border-radius:10px;">
+        <option value="1">Hoy</option>
+        <option value="7" selected>7 días</option>
+        <option value="30">30 días</option>
+      </select>
+      <button id="dashRefresh" class="secondary" style="padding:8px 10px; border-radius:10px;">↻ Actualizar</button>
+    </div>
+  </div>
+
+  <div id="dashGrid">
+    <div class="dashCard">
+      <div class="dashLabel">Usuarios únicos</div>
+      <div class="dashValue" id="mUsers">—</div>
+      <div class="dashHint" id="mUsersHint">—</div>
+    </div>
+
+    <div class="dashCard">
+      <div class="dashLabel">Sesiones</div>
+      <div class="dashValue" id="mSessions">—</div>
+      <div class="dashHint" id="mSessionsHint">—</div>
+    </div>
+
+    <div class="dashCard">
+      <div class="dashLabel">Clicks Ver producto</div>
+      <div class="dashValue" id="mProd">—</div>
+      <div class="dashHint" id="mProdHint">—</div>
+    </div>
+
+    <div class="dashCard">
+      <div class="dashLabel">Clicks Captura</div>
+      <div class="dashValue" id="mCap">—</div>
+      <div class="dashHint" id="mCapHint">—</div>
+    </div>
+
+    <div class="dashCard" style="grid-column:1 / -1;">
+      <div class="dashLabel">Top lentes probados</div>
+      <div id="dashTopLenses" class="dashList">—</div>
+    </div>
+  </div>
+
+  <div id="dashError" style="display:none; margin-top:12px; padding:12px; border-radius:12px; background:rgba(255,0,0,.08); border:1px solid rgba(255,0,0,.22);"></div>
 </div>
 
   <script>
@@ -1712,7 +1827,221 @@ function startAR() {
 
   camera.start();
 }
+/* =========================
+   8) DASHBOARD (web) por cliente
+   URL: ?slug=xxx&dashboard=1&key=yyy
+========================= */
+function isDashboardMode() {
+  const p = new URLSearchParams(location.search);
+  return p.get("dashboard") === "1";
+}
 
+function getDashboardKeyFromUrl() {
+  return new URLSearchParams(location.search).get("key") || "";
+}
+
+function setDashError(msg) {
+  const el = document.getElementById("dashError");
+  if (!el) return;
+  el.style.display = "block";
+  el.textContent = msg;
+}
+
+function clearDashError() {
+  const el = document.getElementById("dashError");
+  if (!el) return;
+  el.style.display = "none";
+  el.textContent = "";
+}
+
+function showDashboardUI(cliente) {
+  // ocultar AR/UI
+  const container = document.getElementById("container");
+  const ui = document.getElementById("ui");
+  const brandBar = document.getElementById("brandBar");
+  const searchOverlay = document.getElementById("searchOverlay");
+
+  if (container) container.style.display = "none";
+  if (ui) ui.style.display = "none";
+  if (brandBar) brandBar.style.display = "none";
+  if (searchOverlay) searchOverlay.style.display = "none";
+
+  // mostrar dashboard
+  const page = document.getElementById("dashPage");
+  if (page) page.style.display = "block";
+
+  // header
+  const dashTitle = document.getElementById("dashTitle");
+  const dashSub = document.getElementById("dashSub");
+  const dashLogo = document.getElementById("dashLogo");
+
+  const name = String(cliente?.nombre || cliente?.name || cliente?.slug || slug || "Cliente");
+  if (dashTitle) dashTitle.textContent = `Dashboard · ${name}`;
+  if (dashSub) dashSub.textContent = `Slug: ${String(cliente?.slug || slug || "")}`;
+
+  const logoUrl = String(cliente?.logo_url || "").replace(/\r?\n/g, "").trim();
+  if (dashLogo && logoUrl) {
+    dashLogo.src = logoUrl;
+    dashLogo.style.display = "inline-block";
+  }
+}
+
+function getRangeDays() {
+  const sel = document.getElementById("dashRange");
+  const v = Number(sel?.value || 7);
+  return Number.isFinite(v) ? v : 7;
+}
+
+function sinceDateISO(days) {
+  // lo hacemos en SQL con "now()-interval", pero para filtros en el cliente:
+  return days;
+}
+
+async function loadDashboardData(cliente) {
+  clearDashError();
+
+  const days = getRangeDays();
+
+  const client_slug = String(cliente?.slug || slug || "").trim();
+  if (!client_slug) {
+    setDashError("No hay slug de cliente.");
+    return;
+  }
+
+  // 1) Métricas base (desde la tabla eventos)
+  // Usuarios únicos, sesiones, clicks
+  const sinceExpr = days === 1 ? "1 day" : `${days} days`;
+
+  // ⚠️ supabase-js no permite interval dinámico directo; lo resolvemos trayendo por fecha desde JS
+  // hacemos un time_min en JS: now - days
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  // usuarios/sesiones/page_views
+  const { data: baseData, error: baseErr } = await db
+    .from("facelens_events")
+    .select("visitor_id, session_id, event_name, lens_sku, lens_name, created_at")
+    .eq("client_slug", client_slug)
+    .gte("created_at", since);
+
+  if (baseErr) {
+    setDashError("No pude leer eventos. Revisá permisos (RLS) o políticas de lectura.");
+    return;
+  }
+
+  const rows = baseData || [];
+
+  const uniqVisitors = new Set();
+  const uniqSessions = new Set();
+  let productClicks = 0;
+  let captureClicks = 0;
+
+  // top lentes probados
+  const topMap = new Map(); // key => count
+
+  for (const r of rows) {
+    if (r.visitor_id) uniqVisitors.add(r.visitor_id);
+    if (r.session_id) uniqSessions.add(r.session_id);
+
+    if (r.event_name === "product_click") productClicks++;
+    if (r.event_name === "capture_click") captureClicks++;
+
+    if (r.event_name === "lens_view") {
+      const sku = (r.lens_sku || "SIN_SKU");
+      const name = (r.lens_name || "SIN_NOMBRE");
+      const key = `${sku}||${name}`;
+      topMap.set(key, (topMap.get(key) || 0) + 1);
+    }
+  }
+
+  const users = uniqVisitors.size;
+  const sessions = uniqSessions.size;
+  const reing = Math.max(sessions - users, 0);
+
+  // UI: métricas
+  const mUsers = document.getElementById("mUsers");
+  const mUsersHint = document.getElementById("mUsersHint");
+  const mSessions = document.getElementById("mSessions");
+  const mSessionsHint = document.getElementById("mSessionsHint");
+  const mProd = document.getElementById("mProd");
+  const mProdHint = document.getElementById("mProdHint");
+  const mCap = document.getElementById("mCap");
+  const mCapHint = document.getElementById("mCapHint");
+
+  if (mUsers) mUsers.textContent = String(users);
+  if (mUsersHint) mUsersHint.textContent = days === 1 ? "últimas 24h" : `últimos ${days} días`;
+
+  if (mSessions) mSessions.textContent = String(sessions);
+  if (mSessionsHint) mSessionsHint.textContent = `reingresos est.: ${reing}`;
+
+  if (mProd) mProd.textContent = String(productClicks);
+  if (mProdHint) mProdHint.textContent = "clics en 🛒";
+
+  if (mCap) mCap.textContent = String(captureClicks);
+  if (mCapHint) mCapHint.textContent = "clics en 📸";
+
+  // UI: top lentes
+  const topArr = Array.from(topMap.entries())
+    .map(([key, count]) => {
+      const [sku, name] = key.split("||");
+      return { sku, name, count };
+    })
+    .sort((a,b) => b.count - a.count)
+    .slice(0, 10);
+
+  const list = document.getElementById("dashTopLenses");
+  if (list) {
+    if (!topArr.length) {
+      list.innerHTML = `<div style="opacity:.8;">Todavía no hay datos de lentes probados en este período.</div>`;
+    } else {
+      list.innerHTML = topArr.map((it, i) => `
+        <div class="dashRow">
+          <div style="min-width:0;">
+            <b>${i+1}. ${it.name}</b><br/>
+            <small>SKU: ${it.sku}</small>
+          </div>
+          <div style="font-weight:900;">${it.count}</div>
+        </div>
+      `).join("");
+    }
+  }
+}
+
+async function initDashboardIfNeeded() {
+  if (!isDashboardMode()) return false;
+
+  // cargamos cliente igual (para logo, nombre y validación)
+  const res = await loadClientConfig();
+  const cliente = res?.cliente || window.__client || {};
+
+  // ✅ Seguridad simple con key
+  const urlKey = getDashboardKeyFromUrl();
+  const clientKey =
+    String(
+      cliente?.dashboard_key ||
+      cliente?.dashboardKey ||
+      cliente?.key_dashboard ||
+      cliente?.dash_key ||
+      ""
+    ).trim();
+
+  if (clientKey) {
+    if (!urlKey || urlKey !== clientKey) {
+      showDashboardUI(cliente);
+      setDashError("Acceso denegado. Falta key o es incorrecta.");
+      return true; // estamos en modo dashboard, pero sin datos
+    }
+  }
+
+  showDashboardUI(cliente);
+
+  const btn = document.getElementById("dashRefresh");
+  const sel = document.getElementById("dashRange");
+  if (btn) btn.onclick = () => loadDashboardData(cliente);
+  if (sel) sel.onchange = () => loadDashboardData(cliente);
+
+  await loadDashboardData(cliente);
+  return true;
+}
 /* =========================
      INIT
 ========================= */
@@ -1724,26 +2053,19 @@ function startAR() {
       throw new Error("loadClientConfig() no está definida");
     }
 
+    // ✅ Si es dashboard: NO arrancamos AR
+    const isDash = await initDashboardIfNeeded();
+    if (isDash) {
+      console.log("DASHBOARD ✅ modo activo");
+      return;
+    }
+
     if (typeof startAR !== "function") {
       throw new Error("startAR() no está definida");
     }
 
-    // ✅ asegura IDs de analytics (no rompe)
-    try { if (typeof __anaEnsureIds === "function") __anaEnsureIds(); } catch {}
-
     await loadClientConfig();
     console.log("loadClientConfig ✅ OK");
-
-    // ✅ EVENTO: page_view (ya con cliente cargado)
-    try {
-      if (typeof __anaTrack === "function") {
-        __anaTrack("page_view", null, {
-          href: location.href,
-          ref: document.referrer || "",
-          ua: navigator.userAgent || ""
-        });
-      }
-    } catch {}
 
     if (typeof aplicarFiltro === "function") {
       aplicarFiltro();
