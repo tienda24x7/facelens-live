@@ -1018,8 +1018,13 @@ const productBtnSafe = (typeof productBtn !== "undefined" && productBtn)
 
 /* =========================
    ✅ ANALYTICS (eventos) - NO rompe si falla
-   Tabla: facelens_events
+   Tabla: facelens_events (ahora se escribe vía Edge Function segura)
 ========================= */
+
+// ✅ Endpoint de tu Edge Function (ya deployada)
+const __ANA_EVENT_ENDPOINT =
+  "https://romgbrobvperljaviekj.supabase.co/functions/v1/swift-handler";
+
 const __ANA = {
   visitorKey: "facelens_visitor_id_v1",
   sessionKey: "facelens_session_id_v1",
@@ -1063,6 +1068,7 @@ function __anaClientInfo() {
   const c = window.__client || {};
   return {
     client_id: c.id || null,
+    // usamos el slug de window.__client si existe (mejor), sino fallback a variable slug global
     client_slug: c.slug || (typeof slug !== "undefined" ? String(slug || "") : null),
   };
 }
@@ -1076,32 +1082,51 @@ function __anaLensInfo(lens) {
   };
 }
 
+/**
+ * ✅ Envía evento a la Edge Function.
+ * - No rompe si falla
+ * - Usa SUPABASE_ANON_KEY del front (público) para Authorization
+ */
 async function __anaTrack(event_name, lens, meta) {
   try {
     if (!__ANA.ready) __anaEnsureIds();
-    if (!db?.from) return;
 
     const ci = __anaClientInfo();
     const li = __anaLensInfo(lens);
 
     const payload = {
-      client_id: ci.client_id,
-      client_slug: ci.client_slug,
+      // Lo que la function espera:
+      slug: String(ci.client_slug || "tienda24x7_demo").trim(),
+      event_name: String(event_name || "").trim(),
       visitor_id: __ANA.visitor_id,
       session_id: __ANA.session_id,
-      event_name: String(event_name || "").trim(),
-      lens_id: li.lens_id,
-      lens_sku: li.lens_sku,
-      lens_name: li.lens_name,
+
+      // Campos útiles extra
+      sku: li.lens_sku,
+      model_name: li.lens_name,
+
+      // meta extra (queda como objeto si querés usarlo luego en el dashboard)
+      // Si en tu tabla no existe "meta", no pasa nada: la function lo ignora.
       meta: meta && typeof meta === "object" ? meta : {},
+
+      // contexto
+      page_url: window.location.href,
+      referrer: document.referrer || "",
+      user_agent: navigator.userAgent,
     };
 
-    // fire-and-forget (no bloquea)
-    db.from("facelens_events").insert(payload).then(({ error }) => {
-      if (error) {
-        // console.warn("ANA insert error:", error.message);
-      }
-    });
+    // ✅ fire-and-forget (no bloquea)
+    fetch(__ANA_EVENT_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Supabase Functions requieren auth: usamos el anon key público (NO el service role)
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: "Bearer " + SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => {});
   } catch (e) {
     // no rompemos nunca
   }
@@ -1163,7 +1188,6 @@ function getClientDefaultUrl() {
     c.link,
   ]);
 }
-
 /* =========================
    ✅ helpers para URLs Storage por SKU
 ========================= */
