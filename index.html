@@ -1064,6 +1064,24 @@ function __anaEnsureIds() {
   }
 }
 
+/** ✅ UTM helper (para métricas vendibles por campaña) */
+function __anaGetUTM() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const utm = {
+      utm_source: p.get("utm_source"),
+      utm_medium: p.get("utm_medium"),
+      utm_campaign: p.get("utm_campaign"),
+      utm_content: p.get("utm_content"),
+      utm_term: p.get("utm_term"),
+    };
+    Object.keys(utm).forEach((k) => (utm[k] == null || utm[k] === "") && delete utm[k]);
+    return utm;
+  } catch (e) {
+    return {};
+  }
+}
+
 function __anaClientInfo() {
   const c = window.__client || {};
   return {
@@ -1093,6 +1111,7 @@ async function __anaTrack(event_name, lens, meta) {
 
     const ci = __anaClientInfo();
     const li = __anaLensInfo(lens);
+    const m = (meta && typeof meta === "object") ? meta : {};
 
     const payload = {
       // Lo que la function espera:
@@ -1101,13 +1120,19 @@ async function __anaTrack(event_name, lens, meta) {
       visitor_id: __ANA.visitor_id,
       session_id: __ANA.session_id,
 
-      // Campos útiles extra
+      // Campos útiles extra (para dashboard)
       sku: li.lens_sku,
       model_name: li.lens_name,
 
-      // meta extra (queda como objeto si querés usarlo luego en el dashboard)
-      // Si en tu tabla no existe "meta", no pasa nada: la function lo ignora.
-      meta: meta && typeof meta === "object" ? meta : {},
+      // ✅ extras vendibles
+      category: (m.category != null ? String(m.category) : null),
+      product_url: (m.product_url != null ? String(m.product_url) : null),
+
+      // meta extra (queda como objeto si querés usarlo luego)
+      meta: m,
+
+      // ✅ UTMs (campañas)
+      utm: __anaGetUTM(),
 
       // contexto
       page_url: window.location.href,
@@ -1120,7 +1145,6 @@ async function __anaTrack(event_name, lens, meta) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // Supabase Functions requieren auth: usamos el anon key público (NO el service role)
         apikey: SUPABASE_ANON_KEY,
         Authorization: "Bearer " + SUPABASE_ANON_KEY,
       },
@@ -1407,7 +1431,8 @@ async function loadCurrentLens() {
       __anaTrack("lens_view", lens, {
         idx: safeIndex,
         total: lentesFiltrados.length,
-        categoria: String(categoryFilter?.value || "all"),
+        // ✅ guardamos categoría “vendible” (la del filtro)
+        category: String(categoryFilter?.value || "all"),
       });
     }
   } catch {}
@@ -1437,9 +1462,12 @@ async function loadCurrentLens() {
 
       productBtnSafe.textContent = "🛒 Ver producto";
 
-      // ✅ EVENTO: product_click
+      // ✅ EVENTO: product_click (incluye product_url + category)
       productBtnSafe.onclick = () => {
-        __anaTrack("product_click", lens, { finalUrl });
+        __anaTrack("product_click", lens, {
+          product_url: finalUrl,
+          category: String(categoryFilter?.value || "all"),
+        });
         window.open(finalUrl, "_blank", "noopener");
       };
     } else {
@@ -1926,8 +1954,12 @@ async function doCapture() {
   try {
     const lens = __cap_getCurrentLens();
 
-    // ✅ EVENTO: capture_click
-    try { __anaTrack("capture_click", lens, {}); } catch {}
+    // ✅ EVENTO: capture_click (incluye category)
+    try {
+      __anaTrack("capture_click", lens, {
+        category: String(categoryFilter?.value || "all"),
+      });
+    } catch {}
 
     const sku = normalizeSku(lens?.sku || lens?.SKU || lens?.codigo || lens?.id_sku || "");
     const filename = `facelens_${sku || "captura"}.png`;
