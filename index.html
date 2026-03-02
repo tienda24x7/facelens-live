@@ -728,8 +728,9 @@ function applyBrandingFromClient(db, cliente) {
 }
 
 async function loadClientConfig() {
+  // 1) Leer cliente desde la TABLA REAL (no la view)
   const { data: cData, error: cErr } = await db
-    .from("clientes_facelens")
+    .from('clientes facelens')          // ✅ tabla real (con espacio)
     .select("*")
     .eq("slug", slug)
     .limit(1);
@@ -739,6 +740,7 @@ async function loadClientConfig() {
 
   cliente = cData[0];
 
+  // 2) Branding (igual que antes)
   window.__ASSET_VER__ = Date.now();
   try { applyBrandingFromClient(db, cliente); } catch (e) { console.warn("Branding falló:", e); }
 
@@ -746,63 +748,32 @@ async function loadClientConfig() {
   window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
   window.__client.default_url = pickFirstClientUrl(window.__client);
 
+  // 3) PLAN (GO/PRIME/ALL/etc.) - lo dejamos, pero OJO: ya no define catálogo
   const planRaw = String(cliente.plan || "ALL").trim();
   const plan = planRaw.toUpperCase();
 
-  const baseQ = () =>
-    db
-      .from("lentes")
-      .select("*")
-      .eq("cliente_id", cliente.id)
-      .eq("activo", true);
-
+  // 4) Catálogo por cliente (ALL/NICOLAS/EZEQUIEL + overrides)
+  //    Esto viene de la VIEW v_lentes_por_cliente (híbrida)
   let gData = [];
-  let mode = "ALL";
+  let mode = "CATALOGO";
 
-  if (plan === "A" || plan === "B") {
-    mode = `GRUPO_${plan}`;
-    const { data, error } = await baseQ().eq("grupo", plan);
-    if (error) throw new Error("Error leyendo lentes: " + error.message);
-    gData = data || [];
-  } else if (plan === "ALL") {
-    mode = "ALL";
-    const { data, error } = await baseQ();
-    if (error) throw new Error("Error leyendo lentes: " + error.message);
-    gData = data || [];
-  } else {
-    const catalogos = plan
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
+  const scope = String(cliente.catalog_scope || "ALL").toUpperCase();
+  mode = `CATALOGO_${scope}_PLAN_${plan}`;
 
-    mode = `CATALOGOS_${catalogos.join("_")}`;
+  const { data: lensData, error: lErr } = await db
+    .from("v_lentes_por_cliente")       // ✅ view híbrida final
+    .select("*")
+    .eq("client_slug", slug);
 
-    const { data: mapData, error: mapErr } = await db
-      .from("lentes_catalogos")
-      .select("*")
-      .in("catalogo", catalogos);
+  if (lErr) throw new Error("Error leyendo v_lentes_por_cliente: " + lErr.message);
 
-    if (mapErr) throw new Error("Error leyendo lentes_catalogos: " + mapErr.message);
+  gData = lensData || [];
 
-    const lensIds = (mapData || [])
-      .map(pickLensId)
-      .filter(Boolean);
-
-    if (lensIds.length) {
-      const { data, error } = await baseQ().in("id", lensIds);
-      if (error) throw new Error("Error leyendo lentes por catálogo: " + error.message);
-      gData = data || [];
-    } else {
-      gData = [];
-    }
-
-    window.__client.catalogos = catalogos;
-  }
-
+  // 5) Asignar lentes globales
   lentes = gData || [];
 
   if (!lentes.length) {
-    modelNameEl.textContent = "Sin lentes cargados";
+    modelNameEl.textContent = "Sin lentes disponibles para este catálogo";
   }
 
   console.log("CLIENTE GLOBAL ✅", window.__client);
@@ -810,7 +781,6 @@ async function loadClientConfig() {
 
   return { cliente, plan, lentes, mode };
 }
-
 /* =========================
    5) FILTRO
 ========================= */
