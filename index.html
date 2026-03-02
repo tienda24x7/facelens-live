@@ -1212,7 +1212,7 @@ function getClientDefaultUrl() {
 const SUPABASE_PROJECT_URL = "https://romgbrobvperljaviekj.supabase.co";
 const STORAGE_BUCKET = "facelens-assets";
 
-// Folder principal por cliente (slug)
+// Folder por cliente (solo para casos exclusivos)
 function getLensFolderForClient() {
   const c = window.__client || {};
 
@@ -1228,24 +1228,32 @@ function getLensFolderForClient() {
 /**
  * ✅ NUEVO: folder primario para assets
  * Prioridad:
- * 1) catalog_scope (ALL / NICOLAS / EZEQUIEL)  ← lo que querés para esta etapa
+ * 1) catalog_scope (ALL / NICOLAS / EZEQUIEL)  ← etapa actual
  * 2) slug del cliente (por si hay exclusivos)
- * 3) "ALL" como último fallback razonable
+ * 3) "ALL"
  */
 function getLensFolderForClientPrimary() {
   const c = window.__client || {};
 
-  const scope = String(
+  const scopeRaw = String(
     c.catalog_scope || c.catalogo_scope || c.catalogo || c.catalog || ""
   ).trim();
 
-  if (scope) return scope;
+  const scope = scopeRaw.toUpperCase();
 
-  return getLensFolderForClient();
+  // ✅ validamos para no romper si viene cualquier cosa
+  if (scope === "ALL" || scope === "NICOLAS" || scope === "EZEQUIEL") return scope;
+
+  // si vino "Nicolas" o "Ezequiel" sin mayúsculas, el toUpperCase ya lo arregla,
+  // pero si vino otro valor raro, volvemos al slug (exclusivos) o ALL
+  const byClient = getLensFolderForClient();
+  if (byClient && byClient !== "default") return byClient;
+
+  return "ALL";
 }
 
 /**
- * ✅ NUEVO: fallback
+ * ✅ Fallback universal
  * Si el catálogo específico no tiene el SKU, probamos ALL.
  */
 function getLensFolderFallback() {
@@ -1275,7 +1283,6 @@ function buildPublicStorageUrl(pathInBucket) {
   const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
   return ver ? `${base}?v=${encodeURIComponent(ver)}` : base;
 }
-
 function buildPathsForSku(folder, sku) {
   const basePath = `lentes/${folder}/`;
 
