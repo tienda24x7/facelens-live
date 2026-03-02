@@ -771,6 +771,28 @@ async function loadClientConfig() {
 
   // 5) Asignar lentes globales
   lentes = gData || [];
+// =========================
+// ✅ LIMITACIÓN por plan (GO/PRIME)
+// =========================
+function __planLimit(p) {
+  const s = String(p || "").toUpperCase().replace(/\s+/g, "");
+  // acepta: GO50, PRIME80, GO150, PRIMETOTAL, GO_TOTAL, TOTAL, GO270, etc.
+  const m = s.match(/(GO|PRIME)(\d{2,3})/);
+  if (m && m[2]) return Number(m[2]);
+
+  if (s.includes("TOTAL")) return 270;
+  if (s.includes("GO270")) return 270;
+
+  return null; // sin límite
+}
+
+try {
+  const lim = __planLimit(plan);
+  if (lim && Array.isArray(lentes) && lentes.length > lim) {
+    lentes = lentes.slice(0, lim);
+    console.log("✅ Limit por plan:", plan, "→", lim, "lentes");
+  }
+} catch {}
 
   if (!lentes.length) {
     modelNameEl.textContent = "Sin lentes disponibles para este catálogo";
