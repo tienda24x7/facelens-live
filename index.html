@@ -1204,6 +1204,96 @@ function getClientDefaultUrl() {
     c.link,
   ]);
 }
+
+/* =========================
+   ✅ NUEVO: URL por producto (SKU) + limitación por plan
+   - Busca override en clientes_lentes_urls (cliente_id + lente_id)
+   - Aplica límite: GO80 => solo primeros 80 usan URL de producto
+   - Si no hay URL (o está fuera de límite): cae a HOME; si no hay HOME: WhatsApp
+========================= */
+
+function __planToUrlLimit(planRaw) {
+  const p = String(planRaw || "").trim().toUpperCase();
+
+  // ejemplos: GO80, GO150, PRIME150, PRIME80
+  const m = p.match(/(GO|PRIME)\s*0*(\d{1,4})/i);
+  if (m && m[2]) {
+    const n = Number(m[2]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  // si es ALL o vacío: sin límite práctico de urls por producto
+  if (p === "ALL" || p === "") return 999999;
+
+  // fallback conservador
+  return 999999;
+}
+
+// cache en memoria para no consultar la tabla en cada click
+const __productUrlCache = new Map(); // key: `${clientId}::${lensId}` => string(url)|""
+
+async function __getProductUrlOverrideForLens(lens) {
+  try {
+    const c = window.__client || {};
+    const clientId = String(c.id || "").trim();
+    const lensId = String(lens?.id || "").trim();
+
+    if (!clientId || !lensId) return "";
+
+    const key = `${clientId}::${lensId}`;
+    if (__productUrlCache.has(key)) return __productUrlCache.get(key) || "";
+
+    const { data, error } = await db
+      .from("clientes_lentes_urls")
+      .select("product_url")
+      .eq("cliente_id", clientId)
+      .eq("lente_id", lensId)
+      .maybeSingle();
+
+    if (error) {
+      __productUrlCache.set(key, "");
+      return "";
+    }
+
+    const url = String(data?.product_url || "").trim();
+    __productUrlCache.set(key, url || "");
+    return url || "";
+  } catch {
+    return "";
+  }
+}
+
+async function __resolveFinalUrlForLens(lens, idx) {
+  const c = window.__client || {};
+
+  const urlLimit = __planToUrlLimit(c.plan);
+  const allowProductUrl = (Number(idx) >= 0 && Number(idx) < urlLimit);
+
+  // 1) URL de producto (solo si idx dentro del límite del plan)
+  let urlProducto = "";
+  if (allowProductUrl) {
+    // prioridad: override por cliente+lente -> luego url embebida en el lente (si existiera)
+    urlProducto = await __getProductUrlOverrideForLens(lens);
+    if (!urlProducto) urlProducto = pickFirstUrl(lens);
+  }
+
+  // 2) HOME / default del cliente
+  const urlHome = getClientDefaultUrl();
+
+  // 3) WhatsApp
+  const waPhone = getClientWhatsApp();
+  const urlWa = buildWhatsAppUrl(waPhone, lens);
+
+  return {
+    finalUrl: urlProducto || urlHome || urlWa || "",
+    urlProducto: urlProducto || "",
+    urlHome: urlHome || "",
+    urlWa: urlWa || "",
+    allowProductUrl,
+    urlLimit
+  };
+}
+
 /* =========================
    ✅ helpers para URLs Storage por SKU
 ========================= */
@@ -1244,8 +1334,7 @@ function getLensFolderForClientPrimary() {
   // ✅ validamos para no romper si viene cualquier cosa
   if (scope === "ALL" || scope === "NICOLAS" || scope === "EZEQUIEL") return scope;
 
-  // si vino "Nicolas" o "Ezequiel" sin mayúsculas, el toUpperCase ya lo arregla,
-  // pero si vino otro valor raro, volvemos al slug (exclusivos) o ALL
+  // si vino otro valor raro, volvemos al slug (exclusivos) o ALL
   const byClient = getLensFolderForClient();
   if (byClient && byClient !== "default") return byClient;
 
@@ -1283,6 +1372,7 @@ function buildPublicStorageUrl(pathInBucket) {
   const ver = (typeof window !== "undefined" && window.__ASSET_VER__) ? String(window.__ASSET_VER__) : "";
   return ver ? `${base}?v=${encodeURIComponent(ver)}` : base;
 }
+
 function buildPathsForSku(folder, sku) {
   const basePath = `lentes/${folder}/`;
 
@@ -1449,23 +1539,21 @@ async function loadCurrentLens() {
       __anaTrack("lens_view", lens, {
         idx: safeIndex,
         total: lentesFiltrados.length,
-        // ✅ guardamos categoría “vendible” (la del filtro)
         category: String(categoryFilter?.value || "all"),
       });
     }
   } catch {}
 
-  const urlLens = pickFirstUrl(lens);
-  const urlCliente = getClientDefaultUrl();
-  const waPhone = getClientWhatsApp();
-  const waUrl = buildWhatsAppUrl(waPhone, lens);
-
-  const finalUrl = urlLens || urlCliente || waUrl;
+  // ✅ NUEVO: resolvemos URL con limitación por plan
+  const resolved = await __resolveFinalUrlForLens(lens, safeIndex);
+  const finalUrl = resolved.finalUrl;
 
   console.log("BTN DEBUG:", {
-    urlLens,
-    urlCliente,
-    waPhone,
+    allowProductUrl: resolved.allowProductUrl,
+    urlLimit: resolved.urlLimit,
+    urlProducto: resolved.urlProducto,
+    urlHome: resolved.urlHome,
+    urlWa: resolved.urlWa,
     finalUrl,
     idx: safeIndex,
     total: lentesFiltrados.length
@@ -1485,6 +1573,12 @@ async function loadCurrentLens() {
         __anaTrack("product_click", lens, {
           product_url: finalUrl,
           category: String(categoryFilter?.value || "all"),
+          // meta extra útil
+          meta: {
+            allowProductUrl: resolved.allowProductUrl,
+            urlLimit: resolved.urlLimit,
+            used: resolved.urlProducto ? "product_url" : (resolved.urlHome ? "home_url" : "whatsapp"),
+          }
         });
         window.open(finalUrl, "_blank", "noopener");
       };
@@ -1637,8 +1731,15 @@ __updateCompareUI();
 
 /* ... (resto del bloque igual que tu original, sin cambios) ... */
 
-if (captureBtn) {
-  captureBtn.onclick = () => { doCapture(); };
+// ✅ FIX: no depender de que captureBtn exista como variable en este scope
+const captureBtnSafe = (typeof captureBtn !== "undefined" && captureBtn)
+  ? captureBtn
+  : document.getElementById("captureBtn");
+
+if (captureBtnSafe) {
+  captureBtnSafe.onclick = () => { doCapture(); };
+} else {
+  console.warn("⚠️ No se encontró #captureBtn en el DOM.");
 }
 /* =========================
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
