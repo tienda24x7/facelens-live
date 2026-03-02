@@ -1172,6 +1172,11 @@ function pickFirstUrlFromCandidates(candidates) {
 
 function pickFirstUrl(lens) {
   return pickFirstUrlFromCandidates([
+    // ✅ prioridad: url por cliente+sku si la view la trae
+    lens?.product_url_cliente,
+    lens?.productUrlCliente,
+
+    // lo existente
     lens?.product_url,
     lens?.productUrl,
     lens?.ml_url,
@@ -1181,7 +1186,6 @@ function pickFirstUrl(lens) {
     lens?.url,
   ]);
 }
-
 function getClientWhatsApp() {
   const c = window.__client || {};
   const wa = c.whatsapp_norm || c.whatsapp || c.WhatsApp || "";
@@ -1544,9 +1548,24 @@ async function loadCurrentLens() {
     }
   } catch {}
 
-  // ✅ NUEVO: resolvemos URL con limitación por plan
+    // ✅ NUEVO: resolvemos URL con limitación por plan
   const resolved = await __resolveFinalUrlForLens(lens, safeIndex);
   const finalUrl = resolved.finalUrl;
+
+  // ✅ etiqueta dinámica + tipo (vendible)
+  let btnLabel = "";
+  let btnKind = ""; // product | store | whatsapp
+
+  if (resolved.urlProducto) {
+    btnLabel = "🛒 Ver producto";
+    btnKind = "product";
+  } else if (resolved.urlHome) {
+    btnLabel = "🏠 Ir a la tienda";
+    btnKind = "store";
+  } else if (resolved.urlWa) {
+    btnLabel = "💬 Consultar";
+    btnKind = "whatsapp";
+  }
 
   console.log("BTN DEBUG:", {
     allowProductUrl: resolved.allowProductUrl,
@@ -1555,6 +1574,7 @@ async function loadCurrentLens() {
     urlHome: resolved.urlHome,
     urlWa: resolved.urlWa,
     finalUrl,
+    btnKind,
     idx: safeIndex,
     total: lentesFiltrados.length
   });
@@ -1566,20 +1586,20 @@ async function loadCurrentLens() {
       productBtnSafe.style.alignItems = "center";
       productBtnSafe.style.justifyContent = "center";
 
-      productBtnSafe.textContent = "🛒 Ver producto";
+      productBtnSafe.textContent = btnLabel || "🛒 Ver";
 
-      // ✅ EVENTO: product_click (incluye product_url + category)
       productBtnSafe.onclick = () => {
         __anaTrack("product_click", lens, {
           product_url: finalUrl,
+          destination_kind: btnKind,
           category: String(categoryFilter?.value || "all"),
-          // meta extra útil
           meta: {
             allowProductUrl: resolved.allowProductUrl,
             urlLimit: resolved.urlLimit,
             used: resolved.urlProducto ? "product_url" : (resolved.urlHome ? "home_url" : "whatsapp"),
           }
         });
+
         window.open(finalUrl, "_blank", "noopener");
       };
     } else {
