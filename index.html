@@ -744,9 +744,23 @@ async function loadClientConfig() {
   window.__ASSET_VER__ = Date.now();
   try { applyBrandingFromClient(db, cliente); } catch (e) { console.warn("Branding falló:", e); }
 
+  // ✅ Cliente global
   window.__client = cliente || {};
   window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
-  window.__client.default_url = pickFirstClientUrl(window.__client);
+
+  // ✅ FIX: default_url NO se pisa si ya viene del cliente
+  // - prioridad: columna real default_url / defaultUrl
+  // - fallback: pickFirstClientUrl(window.__client)
+  const dbDefault =
+    String(window.__client.default_url || window.__client.defaultUrl || "").trim();
+
+  const computedDefault =
+    String((typeof pickFirstClientUrl === "function" ? pickFirstClientUrl(window.__client) : "") || "").trim();
+
+  const finalDefault = dbDefault || computedDefault || "";
+
+  window.__client.default_url = finalDefault;
+  window.__client.defaultUrl = finalDefault; // compatibilidad
 
   // 3) PLAN (GO/PRIME/ALL/etc.) - lo dejamos, pero OJO: ya no define catálogo
   const planRaw = String(cliente.plan || "ALL").trim();
@@ -771,28 +785,29 @@ async function loadClientConfig() {
 
   // 5) Asignar lentes globales
   lentes = gData || [];
-// =========================
-// ✅ LIMITACIÓN por plan (GO/PRIME)
-// =========================
-function __planLimit(p) {
-  const s = String(p || "").toUpperCase().replace(/\s+/g, "");
-  // acepta: GO50, PRIME80, GO150, PRIMETOTAL, GO_TOTAL, TOTAL, GO270, etc.
-  const m = s.match(/(GO|PRIME)(\d{2,3})/);
-  if (m && m[2]) return Number(m[2]);
 
-  if (s.includes("TOTAL")) return 270;
-  if (s.includes("GO270")) return 270;
+  // =========================
+  // ✅ LIMITACIÓN por plan (GO/PRIME)
+  // =========================
+  function __planLimit(p) {
+    const s = String(p || "").toUpperCase().replace(/\s+/g, "");
+    // acepta: GO50, PRIME80, GO150, PRIMETOTAL, GO_TOTAL, TOTAL, GO270, etc.
+    const m = s.match(/(GO|PRIME)(\d{2,3})/);
+    if (m && m[2]) return Number(m[2]);
 
-  return null; // sin límite
-}
+    if (s.includes("TOTAL")) return 270;
+    if (s.includes("GO270")) return 270;
 
-try {
-  const lim = __planLimit(plan);
-  if (lim && Array.isArray(lentes) && lentes.length > lim) {
-    lentes = lentes.slice(0, lim);
-    console.log("✅ Limit por plan:", plan, "→", lim, "lentes");
+    return null; // sin límite
   }
-} catch {}
+
+  try {
+    const lim = __planLimit(plan);
+    if (lim && Array.isArray(lentes) && lentes.length > lim) {
+      lentes = lentes.slice(0, lim);
+      console.log("✅ Limit por plan:", plan, "→", lim, "lentes");
+    }
+  } catch {}
 
   if (!lentes.length) {
     modelNameEl.textContent = "Sin lentes disponibles para este catálogo";
