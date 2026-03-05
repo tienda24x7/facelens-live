@@ -1739,27 +1739,283 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 
 __updateCompareUI();
 
+<script>
 /* =========================
    ✅ CAPTURA (BRANDEADA) - AUTOCONTENIDA
+   - Logo cliente
+   - Nombre lente en 2 líneas
+   - QR: product_url -> default_url -> whatsapp (misma lógica)
    FIX ANDROID:
    - downscale en móvil (evita toBlob null / OOM)
    - fallback a toDataURL->Blob si toBlob falla
    - share directo en móvil; si falla, abre imagen
-   + incluye buildBrandedCaptureCanvas() (logo + modelo + QR)
 ========================= */
 
-/* ... (resto del bloque igual que tu original, sin cambios) ... */
+// ---------- helpers ----------
+function $(id){ return document.getElementById(id); }
+
+function isMobile() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+}
+
+function canvasToBlobSafe(cnv) {
+  return new Promise((resolve) => {
+    try {
+      if (!cnv) return resolve(null);
+      if (cnv.toBlob) {
+        cnv.toBlob((b) => resolve(b || null), "image/png", 0.92);
+      } else {
+        // very old browsers
+        const dataUrl = cnv.toDataURL("image/png");
+        resolve(dataURLToBlob(dataUrl));
+      }
+    } catch {
+      try {
+        const dataUrl = cnv.toDataURL("image/png");
+        resolve(dataURLToBlob(dataUrl));
+      } catch {
+        resolve(null);
+      }
+    }
+  });
+}
+
+function dataURLToBlob(dataUrl) {
+  const parts = String(dataUrl).split(",");
+  const mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/png";
+  const bstr = atob(parts[1] || "");
+  let n = bstr.length;
+  const u8 = new Uint8Array(n);
+  while (n--) u8[n] = bstr.charCodeAt(n);
+  return new Blob([u8], { type: mime });
+}
+
+function loadImage(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+// --------- 2 líneas de texto (simple) ----------
+function splitTwoLines(text, maxLen = 24) {
+  const s = String(text || "").trim();
+  if (!s) return ["", ""];
+  if (s.length <= maxLen) return [s, ""];
+  // corta por espacio cercano
+  let cut = s.lastIndexOf(" ", maxLen);
+  if (cut < 10) cut = maxLen;
+  return [s.slice(0, cut).trim(), s.slice(cut).trim()];
+}
+
+// --------- QR (sin librerías externas) ----------
+// Usamos un mini QR por API de imagen (rápido y robusto).
+// (Si querés 100% offline, lo cambiamos luego.)
+function qrUrlFor(text) {
+  const payload = encodeURIComponent(String(text || ""));
+  // API pública simple de QR como imagen PNG (solo para generar el QR)
+  // Si preferís, lo cambiamos por qrcode.js local.
+  return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${payload}`;
+}
+
+// --------- resolver URL destino (misma lógica de click) ----------
+async function resolveBestUrlForLens(lens) {
+  const c = window.__client || {};
+  // 1) product_url por SKU (override)
+  let url = "";
+  try {
+    if (typeof __getProductUrlOverrideForLens === "function") {
+      url = (await __getProductUrlOverrideForLens(lens)) || "";
+      url = String(url).trim();
+    }
+  } catch {}
+  if (url) return url;
+
+  // 2) default_url (home)
+  const home = String(c.default_url || "").trim();
+  if (home) return home;
+
+  // 3) whatsapp
+  const wa = String(c.whatsapp || "").trim().replace(/\s+/g, "");
+  if (wa) return `https://wa.me/${wa}`;
+
+  return "";
+}
+
+// --------- construir canvas de captura (video + overlay + branding) ----------
+async function buildBrandedCaptureCanvas() {
+  const video = $("video") || document.querySelector("video");
+  if (!video) throw new Error("No encuentro <video>.");
+
+  // overlay: si tenés un canvas donde dibujás el frame/lente, lo sumamos
+  const overlay = $("overlayCanvas") || $("overlay") || document.querySelector("canvas");
+  const c = window.__client || {};
+
+  // lente seleccionado: ajustá si tu app usa otro nombre
+  const lens =
+    window.__selectedLens ||
+    window.__currentLens ||
+    window.__lens ||
+    window.selectedLens ||
+    {};
+
+  // tamaño real del video
+  const vw = video.videoWidth || 720;
+  const vh = video.videoHeight || 1280;
+
+  // downscale móvil (evita OOM / toBlob null)
+  const maxW = isMobile() ? 1080 : 1600;
+  const scale = Math.min(1, maxW / vw);
+  const W = Math.round(vw * scale);
+  const H = Math.round(vh * scale);
+
+  const cnv = document.createElement("canvas");
+  cnv.width = W;
+  cnv.height = H;
+  const ctx = cnv.getContext("2d");
+
+  // 1) frame video
+  ctx.drawImage(video, 0, 0, W, H);
+
+  // 2) overlay (si existe y coincide)
+  if (overlay && overlay.width && overlay.height) {
+    // dibuja overlay escalado al canvas final
+    ctx.drawImage(overlay, 0, 0, W, H);
+  }
+
+  // 3) bandeja inferior semitransparente
+  const pad = Math.round(18 * scale);
+  const barH = Math.round(190 * scale);
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, H - barH, W, barH);
+  ctx.restore();
+
+  // 4) logo cliente
+  const logoUrl = String(c.logo_url || "").trim();
+  const logoImg = await loadImage(logoUrl);
+  const logoBox = Math.round(86 * scale);
+  const logoX = pad;
+  const logoY = H - barH + pad;
+
+  if (logoImg) {
+    // fondo blanco suave para que se vea siempre
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    ctx.roundRect(logoX, logoY, logoBox, logoBox, Math.round(12 * scale));
+    ctx.fill();
+    ctx.restore();
+
+    // logo dentro
+    ctx.drawImage(logoImg, logoX + Math.round(10 * scale), logoY + Math.round(10 * scale),
+      logoBox - Math.round(20 * scale), logoBox - Math.round(20 * scale));
+  }
+
+  // 5) texto lente en 2 líneas
+  const lensName =
+    String(lens?.nombre || lens?.name || lens?.modelo || lens?.model || lens?.sku || "").trim();
+
+  const [line1, line2] = splitTwoLines(lensName, 26);
+
+  const textX = logoImg ? (logoX + logoBox + Math.round(14 * scale)) : pad;
+  const textY = H - barH + pad + Math.round(10 * scale);
+
+  ctx.save();
+  ctx.fillStyle = "white";
+  ctx.font = `bold ${Math.round(26 * scale)}px Arial`;
+  ctx.fillText(line1, textX, textY + Math.round(28 * scale));
+  ctx.font = `${Math.round(22 * scale)}px Arial`;
+  if (line2) ctx.fillText(line2, textX, textY + Math.round(58 * scale));
+  ctx.restore();
+
+  // 6) QR a la derecha
+  const bestUrl = await resolveBestUrlForLens(lens);
+  const qrImg = await loadImage(qrUrlFor(bestUrl || " "));
+  const qrSize = Math.round(120 * scale);
+  const qrX = W - pad - qrSize;
+  const qrY = H - barH + pad;
+
+  if (qrImg) {
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.beginPath();
+    ctx.roundRect(qrX - Math.round(8 * scale), qrY - Math.round(8 * scale),
+      qrSize + Math.round(16 * scale), qrSize + Math.round(16 * scale), Math.round(12 * scale));
+    ctx.fill();
+    ctx.restore();
+
+    ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+
+    // label QR
+    ctx.save();
+    ctx.fillStyle = "white";
+    ctx.font = `${Math.round(16 * scale)}px Arial`;
+    ctx.fillText("Escaneá para ver", qrX - Math.round(6 * scale), qrY + qrSize + Math.round(26 * scale));
+    ctx.restore();
+  }
+
+  return cnv;
+}
+
+// --------- ejecutar captura + share ----------
+async function doCapture() {
+  try {
+    const cnv = await buildBrandedCaptureCanvas();
+    const blob = await canvasToBlobSafe(cnv);
+
+    if (!blob) throw new Error("No pude generar la imagen (blob null).");
+
+    const file = new File([blob], `facelens_${Date.now()}.png`, { type: "image/png" });
+
+    // Share en móvil si es posible
+    const canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }));
+    if (canShare) {
+      await navigator.share({ files: [file], title: "FaceLens", text: "Mi prueba con FaceLens" });
+      return;
+    }
+
+    // Fallback: abrir imagen en nueva pestaña
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    console.warn("❌ Captura falló:", e);
+    alert("No se pudo generar la captura. Probá de nuevo o bajá la resolución del teléfono.");
+  }
+}
 
 // ✅ FIX: no depender de que captureBtn exista como variable en este scope
-const captureBtnSafe = (typeof captureBtn !== "undefined" && captureBtn)
-  ? captureBtn
-  : document.getElementById("captureBtn");
+const captureBtnSafe =
+  (typeof captureBtn !== "undefined" && captureBtn)
+    ? captureBtn
+    : document.getElementById("captureBtn");
 
 if (captureBtnSafe) {
   captureBtnSafe.onclick = () => { doCapture(); };
 } else {
   console.warn("⚠️ No se encontró #captureBtn en el DOM.");
 }
+
+// soporte roundRect si el browser no lo trae
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    this.beginPath();
+    this.moveTo(x + r, y);
+    this.arcTo(x + w, y, x + w, y + h, r);
+    this.arcTo(x + w, y + h, x, y + h, r);
+    this.arcTo(x, y + h, x, y, r);
+    this.arcTo(x, y, x + w, y, r);
+    this.closePath();
+    return this;
+  };
+}
+</script>
 /* =========================
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
