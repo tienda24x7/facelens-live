@@ -19,7 +19,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- ✅ QR LOCAL (evita CORS/tainted canvas en captura) -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
 
   <style>
   /* =========================
@@ -1520,7 +1520,7 @@ __updateCompareUI();
    ✅ CAPTURA (BRANDEADA) - AUTOCONTENIDA (FIX)
    - Logo cliente
    - Nombre lente en 2 líneas (prioriza nombre_modelo)
-   - QR LOCAL (usa qrcode.min.js del <head>, NO API externa → evita canvas tainted en móvil)
+   - QR LOCAL (qrcodejs) → evita canvas tainted en móvil
    - Descarga en PC (link download)
    - Share en móvil si se puede; si no, abre imagen
    FIX ANDROID:
@@ -1528,7 +1528,6 @@ __updateCompareUI();
    - fallback a toDataURL->Blob si toBlob falla
 ========================= */
 
-// ---------- helpers ----------
 function $(id){ return document.getElementById(id); }
 
 function isMobile() {
@@ -1566,43 +1565,18 @@ function dataURLToBlob(dataUrl) {
   return new Blob([u8], { type: mime });
 }
 
-// ✅ carga de imagen con fallback por fetch->blob para evitar CORS raros
-async function loadImageSafe(url) {
-  const u = String(url || "").trim();
-  if (!u) return null;
-
-  // 1) Intento robusto: fetch -> blob
-  try {
-    const res = await fetch(u, { mode: "cors", cache: "no-store" });
-    if (res.ok) {
-      const blob = await res.blob();
-      const obj = URL.createObjectURL(blob);
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve;
-        img.src = obj;
-      });
-
-      try { URL.revokeObjectURL(obj); } catch {}
-      if (img.naturalWidth > 0) return img;
-    }
-  } catch {}
-
-  // 2) Fallback directo
-  return await new Promise((resolve) => {
+function loadImage(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(null);
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
-    img.src = u;
+    img.src = url;
   });
 }
 
-// --------- 2 líneas de texto (simple) ----------
-function splitTwoLines(text, maxLen = 26) {
+function splitTwoLines(text, maxLen = 24) {
   const s = String(text || "").trim();
   if (!s) return ["", ""];
   if (s.length <= maxLen) return [s, ""];
@@ -1611,19 +1585,36 @@ function splitTwoLines(text, maxLen = 26) {
   return [s.slice(0, cut).trim(), s.slice(cut).trim()];
 }
 
-// ✅ nombre del lente (prioridad correcta)
-function getLensDisplayName(lens) {
-  return String(
-    lens?.nombre_modelo ||
-    lens?.nombre ||
-    lens?.name ||
-    lens?.modelo ||
-    lens?.model ||
-    ""
-  ).trim() || String(lens?.sku || lens?.SKU || "").trim();
+// ✅ QR LOCAL via qrcodejs (window.QRCode)
+function makeQrCanvasLocal(text, size = 220) {
+  try {
+    if (!window.QRCode) return null;
+
+    const holder = document.createElement("div");
+    holder.style.position = "fixed";
+    holder.style.left = "-99999px";
+    holder.style.top = "-99999px";
+    document.body.appendChild(holder);
+
+    // qrcodejs crea canvas dentro del holder
+    // eslint-disable-next-line no-new
+    new QRCode(holder, {
+      text: String(text || "").trim() || " ",
+      width: size,
+      height: size,
+      correctLevel: QRCode.CorrectLevel.M,
+    });
+
+    const cnv = holder.querySelector("canvas");
+    document.body.removeChild(holder);
+
+    return cnv || null;
+  } catch {
+    return null;
+  }
 }
 
-// --------- resolver URL destino (misma lógica de click) ----------
+// usa la MISMA lógica que el click (product -> default -> whatsapp)
 async function resolveBestUrlForLens(lens) {
   const c = window.__client || {};
 
@@ -1648,41 +1639,16 @@ async function resolveBestUrlForLens(lens) {
   return "";
 }
 
-// ✅ QR LOCAL a canvas (requiere <script src="...qrcode.min.js"></script> en el head)
-async function makeQrCanvas(text, size = 220) {
-  const payload = String(text || "").trim() || " ";
-  const cnv = document.createElement("canvas");
-
-  if (!window.QRCode || !window.QRCode.toCanvas) {
-    // fallback simple: sin QR
-    return null;
-  }
-
-  cnv.width = size;
-  cnv.height = size;
-
-  await window.QRCode.toCanvas(cnv, payload, {
-    width: size,
-    margin: 1,
-    errorCorrectionLevel: "M",
-  });
-
-  return cnv;
-}
-
-// --------- construir canvas de captura (video + overlay + branding) ----------
 async function buildBrandedCaptureCanvas() {
   const video = $("video") || document.querySelector("video");
   if (!video) throw new Error("No encuentro <video>.");
 
-  // overlay: tu canvas principal (donde se dibuja el lente) suele ser el #canvas
   const overlay = $("canvas") || document.querySelector("canvas");
   const c = window.__client || {};
 
-  // lente actual
   const lens =
-    window.__selectedLens ||
     window.__currentLens ||
+    window.__selectedLens ||
     window.__lens ||
     window.selectedLens ||
     {};
@@ -1690,8 +1656,7 @@ async function buildBrandedCaptureCanvas() {
   const vw = video.videoWidth || 720;
   const vh = video.videoHeight || 1280;
 
-  // downscale móvil
-  const maxW = isMobile() ? 900 : 1600;
+  const maxW = isMobile() ? 900 : 1600; // ✅ más bajo en móvil para evitar OOM
   const scale = Math.min(1, maxW / vw);
   const W = Math.round(vw * scale);
   const H = Math.round(vh * scale);
@@ -1717,9 +1682,9 @@ async function buildBrandedCaptureCanvas() {
   ctx.fillRect(0, H - barH, W, barH);
   ctx.restore();
 
-  // 4) logo
-  const logoUrl = String(c.logo_url || "").replace(/\r?\n/g, "").trim();
-  const logoImg = await loadImageSafe(logoUrl);
+  // 4) logo cliente
+  const logoUrl = String(c.logo_url || "").trim();
+  const logoImg = await loadImage(logoUrl);
   const logoBox = Math.round(86 * scale);
   const logoX = pad;
   const logoY = H - barH + pad;
@@ -1741,8 +1706,11 @@ async function buildBrandedCaptureCanvas() {
     );
   }
 
-  // 5) texto lente (2 líneas) ✅ (ya no cae al SKU salvo que no haya nombre)
-  const lensName = getLensDisplayName(lens);
+  // 5) texto lente (✅ prioriza nombre_modelo)
+  const lensName = String(
+    lens?.nombre_modelo || lens?.nombre || lens?.name || lens?.modelo || lens?.model || ""
+  ).trim() || `SKU ${String(lens?.sku || "").trim()}`;
+
   const [line1, line2] = splitTwoLines(lensName, 28);
 
   const textX = logoImg ? (logoX + logoBox + Math.round(14 * scale)) : pad;
@@ -1758,12 +1726,12 @@ async function buildBrandedCaptureCanvas() {
 
   // 6) QR a la derecha (LOCAL)
   const bestUrl = await resolveBestUrlForLens(lens);
+  const qrCanvas = makeQrCanvasLocal(bestUrl, Math.round(220 * scale));
   const qrSize = Math.round(120 * scale);
   const qrX = W - pad - qrSize;
   const qrY = H - barH + pad;
 
-  const qrCnv = await makeQrCanvas(bestUrl || " ", Math.max(140, Math.round(220 * scale)));
-  if (qrCnv) {
+  if (qrCanvas) {
     ctx.save();
     ctx.fillStyle = "rgba(255,255,255,0.92)";
     ctx.beginPath();
@@ -1777,8 +1745,7 @@ async function buildBrandedCaptureCanvas() {
     ctx.fill();
     ctx.restore();
 
-    // dibujar QR escalado al tamaño final
-    ctx.drawImage(qrCnv, qrX, qrY, qrSize, qrSize);
+    ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
 
     ctx.save();
     ctx.fillStyle = "white";
@@ -1790,43 +1757,43 @@ async function buildBrandedCaptureCanvas() {
   return cnv;
 }
 
-// ✅ descarga en PC
-function triggerDownload(blob) {
-  const a = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  a.href = url;
-  a.download = `facelens_${Date.now()}.png`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-
-// --------- ejecutar captura + share ----------
 async function doCapture() {
   try {
     const cnv = await buildBrandedCaptureCanvas();
     const blob = await canvasToBlobSafe(cnv);
-
     if (!blob) throw new Error("No pude generar la imagen (blob null).");
 
     const file = new File([blob], `facelens_${Date.now()}.png`, { type: "image/png" });
 
-    // ✅ Share en móvil si es posible
-    const canShare = !!(navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] })));
+    // ✅ móvil: share si se puede
+    const canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }));
     if (canShare) {
       await navigator.share({ files: [file], title: "FaceLens", text: "Mi prueba con FaceLens" });
       return;
     }
 
-    // ✅ Desktop: descarga
-    triggerDownload(blob);
+    // ✅ PC (y fallback móvil): descargar
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `facelens_${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    // si el navegador bloquea download (algunos móviles), abrimos
+    setTimeout(() => {
+      try { window.open(url, "_blank"); } catch {}
+    }, 350);
+
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {
     console.warn("❌ Captura falló:", e);
-    alert("No se pudo generar la captura. Probá de nuevo (en Android: bajá resolución / cerrá otras apps).");
+    alert("No se pudo generar la captura. Probá de nuevo o bajá la resolución del teléfono.");
   }
 }
-// ✅ FIX: no depender de que captureBtn exista como variable en este scope
+
+// FIX botón
 const captureBtnSafe =
   (typeof captureBtn !== "undefined" && captureBtn)
     ? captureBtn
@@ -1838,7 +1805,7 @@ if (captureBtnSafe) {
   console.warn("⚠️ No se encontró #captureBtn en el DOM.");
 }
 
-// soporte roundRect si el browser no lo trae
+// soporte roundRect
 if (!CanvasRenderingContext2D.prototype.roundRect) {
   CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
