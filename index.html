@@ -1217,7 +1217,7 @@ function getClientDefaultUrl() {
 
 /* =========================
    ✅ NUEVO: URL por producto (SKU) + limitación por plan
-   - Busca override en clientes_lentes_urls (cliente_id + sku)
+   - Busca override en v_clientes_lentes_urls (cliente_id + sku)
    - Aplica límite: GO80 => solo primeros 80 usan URL de producto
    - Si no hay URL (o está fuera de límite): cae a HOME; si no hay HOME: WhatsApp
 ========================= */
@@ -1255,7 +1255,7 @@ async function __getProductUrlOverrideForLens(lens) {
 
     // ✅ IMPORTANTE: usamos cliente_id + sku (NO lente_id)
     const { data, error } = await db
-      .from("clientes_lentes_urls")
+      .from("v_clientes_lentes_urls")
       .select("product_url")
       .eq("cliente_id", clientId)
       .eq("sku", sku)
