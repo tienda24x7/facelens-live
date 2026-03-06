@@ -18,19 +18,19 @@
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- ✅ QR LOCAL (evita CORS/tainted canvas en captura) -->
-<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
+  <!-- ✅ QR LOCAL (qrcodejs) -->
+  <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
 
   <style>
   /* =========================
      ✅ BRAND DEFAULT (no rompe nada)
   ========================= */
   :root{
-    --brand-primary: #0f0f0f;         /* fondo base */
-    --brand-surface: rgba(0,0,0,.60); /* panel UI */
-    --brand-accent: #ffffff;          /* acento (texto/botones) */
-    --brand-muted: #333333;           /* secundarios */
-    --brand-on-primary: #ffffff;      /* texto sobre primary/surface */
+    --brand-primary: #0f0f0f;
+    --brand-surface: rgba(0,0,0,.60);
+    --brand-accent: #ffffff;
+    --brand-muted: #333333;
+    --brand-on-primary: #ffffff;
   }
 
   body { margin:0; background:var(--brand-primary); color:var(--brand-on-primary); font-family:Arial }
@@ -38,7 +38,6 @@
   #container { position:relative; width:100vw; height:100vh }
   video, canvas { position:absolute; width:100%; height:100%; object-fit:cover }
 
-  /* ✅ Logo arriba (overlay seguro) */
   #brandBar{
     position:fixed;
     top:0; left:0; right:0;
@@ -46,24 +45,20 @@
     align-items:center;
     gap:10px;
     padding:10px 12px;
-    pointer-events:none; /* no bloquea clicks */
+    pointer-events:none;
     z-index:10;
   }
 
-  /* ✅ Solo cuando hay logo cargado (clase la agrega JS) */
   #brandBar.hasBrand{
     background: linear-gradient(to bottom, rgba(0,0,0,.35), rgba(0,0,0,0));
   }
 
-  /* ✅ Logo +30% (móvil y PC) */
   #brandLogo{
-    height:42px;          /* antes 32px */
-    display:none;         /* se muestra cuando carga */
+    height:42px;
+    display:none;
     pointer-events:none;
     filter: drop-shadow(0 2px 6px rgba(0,0,0,.55));
   }
-
-  /* ✅ Desktop: +30% respecto al anterior desktop (38px -> ~49px) */
   @media (min-width: 900px){
     #brandLogo{ height:50px; }
   }
@@ -76,32 +71,40 @@
     overflow:hidden;
     text-overflow:ellipsis;
     max-width:70vw;
-    display:none; /* opcional: se activa si hay nombre de marca */
+    display:none;
   }
 
-  /* ✅ Panel inferior con "marca" visible en PC */
   #ui {
     position:fixed;
     bottom:0; left:0; right:0;
     padding:12px;
     background:var(--brand-surface);
     z-index:9;
-
-    /* ✅ Esto hace que el primario se vea también en desktop */
     border-top: 4px solid var(--brand-primary);
   }
 
   button, select { padding:10px 12px; border:none; border-radius:10px; font-weight:bold; cursor:pointer }
-
-  /* ✅ Botón primario (si algún día lo usás) */
   button.primary { background:var(--brand-accent); color:#000; }
-
-  /* ✅ Secundarios (como ya venías usando) */
   button.secondary, select { background:var(--brand-muted); color:var(--brand-on-primary) }
-
   button.hidden { display:none }
-
   #modelName { flex:1; text-align:center; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+
+  /* =========================
+     ✅ FIX POPUP ONBOARDING (clickeable + centrado)
+  ========================= */
+  #onboardOverlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:9999;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+    background:rgba(0,0,0,.72);
+    pointer-events:auto;           /* ✅ permite click */
+  }
+  #onboardCard{ pointer-events:auto; } /* ✅ permite click dentro */
+  #onboardBtn, #onboardLater{ pointer-events:auto; }
 
   /* ... resto de tu CSS sin cambios ... */
   </style>
@@ -259,19 +262,38 @@
 
   <script>
 /* =========================
-   ✅ ONBOARDING OVERLAY (1ra vez por dispositivo)
+   ✅ ONBOARDING OVERLAY (1ra vez por dispositivo) - FIX CLICK/OVERLAP
+   - Fuerza overlay arriba de todo y clickeable
+   - Asegura que los botones reciban click
 ========================= */
 (function setupOnboardingOverlay(){
   const KEY = "facelens_onboard_done_v1";
 
   const overlay = document.getElementById("onboardOverlay");
+  const card = document.getElementById("onboardCard");
   const btnOk = document.getElementById("onboardBtn");
   const btnNever = document.getElementById("onboardLater");
 
   if (!overlay || !btnOk || !btnNever) return;
 
+  function applyFix() {
+    // ✅ asegura que esté encima y reciba eventos
+    overlay.style.zIndex = "9999";
+    overlay.style.pointerEvents = "auto";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+
+    // ✅ asegura clicks dentro
+    if (card) card.style.pointerEvents = "auto";
+    btnOk.style.pointerEvents = "auto";
+    btnNever.style.pointerEvents = "auto";
+  }
+
   function hide() { overlay.style.display = "none"; }
-  function show() { overlay.style.display = "flex"; }
+  function show() {
+    applyFix();
+    overlay.style.display = "flex";
+  }
 
   // Si ya lo vio antes, no mostramos
   const done = localStorage.getItem(KEY);
@@ -289,7 +311,6 @@
     if (e.target === overlay) hide();
   });
 })();
-
 /* =========================
      0) SUPABASE
   ========================= */
@@ -306,20 +327,23 @@ const slug =
   "tienda24x7_demo";
 
 /* =========================
-   2) UI
+   2) UI (robusto)
 ========================= */
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+
+if (!video) console.warn("⚠️ No se encontró #video");
+if (!canvas) console.warn("⚠️ No se encontró #canvas");
+
+const ctx = canvas ? canvas.getContext("2d") : null;
+if (!ctx) console.warn("⚠️ No se pudo obtener 2D context de #canvas");
 
 const modelNameEl = document.getElementById("modelName");
 const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
 const captureBtn = document.getElementById("captureBtn");
 const productBtn = document.getElementById("productBtn");
-const categoryFilter = document.getElementById("categoryFilter");
-
-/* =========================
+const categoryFilter = document.getElementById("categoryFilter");/* =========================
    2.2) UI - BUSCADOR (LUPA)
 ========================= */
 const searchBtn = document.getElementById("searchBtn");
@@ -1517,15 +1541,16 @@ if (typeof clearCompare !== "undefined" && clearCompare) {
 __updateCompareUI();
 
 /* =========================
-   ✅ CAPTURA (BRANDEADA) - AUTOCONTENIDA (FIX)
+   ✅ CAPTURA (BRANDEADA) - AUTOCONTENIDA (FIX v2)
    - Logo cliente
    - Nombre lente en 2 líneas (prioriza nombre_modelo)
    - QR LOCAL (qrcodejs) → evita canvas tainted en móvil
-   - Descarga en PC (link download)
-   - Share en móvil si se puede; si no, abre imagen
+   - Descarga en PC (download)
+   - Share en móvil si se puede; si no, descarga/abre
    FIX ANDROID:
-   - downscale en móvil (evita toBlob null / OOM)
+   - downscale en móvil (evita OOM/toBlob null)
    - fallback a toDataURL->Blob si toBlob falla
+   - NO rompe el overlay: detecta canvas real (id="canvas") y NO usa el canvas final
 ========================= */
 
 function $(id){ return document.getElementById(id); }
@@ -1588,7 +1613,7 @@ function splitTwoLines(text, maxLen = 24) {
 // ✅ QR LOCAL via qrcodejs (window.QRCode)
 function makeQrCanvasLocal(text, size = 220) {
   try {
-    if (!window.QRCode) return null;
+    if (!window.QRCode || !window.QRCode.CorrectLevel) return null;
 
     const holder = document.createElement("div");
     holder.style.position = "fixed";
@@ -1596,20 +1621,20 @@ function makeQrCanvasLocal(text, size = 220) {
     holder.style.top = "-99999px";
     document.body.appendChild(holder);
 
-    // qrcodejs crea canvas dentro del holder
     // eslint-disable-next-line no-new
-    new QRCode(holder, {
+    new window.QRCode(holder, {
       text: String(text || "").trim() || " ",
       width: size,
       height: size,
-      correctLevel: QRCode.CorrectLevel.M,
+      correctLevel: window.QRCode.CorrectLevel.M,
     });
 
     const cnv = holder.querySelector("canvas");
     document.body.removeChild(holder);
 
     return cnv || null;
-  } catch {
+  } catch (e) {
+    console.warn("QR local falló:", e);
     return null;
   }
 }
@@ -1639,11 +1664,24 @@ async function resolveBestUrlForLens(lens) {
   return "";
 }
 
+// ✅ detecta overlay canvas real SIN apuntar al canvas que vamos a exportar
+function getOverlayCanvas() {
+  // tu canvas real del AR es id="canvas"
+  const c = document.getElementById("canvas");
+  if (c && c.tagName === "CANVAS") return c;
+
+  // fallbacks seguros
+  const any = document.querySelector("#container canvas");
+  if (any && any.tagName === "CANVAS") return any;
+
+  return null;
+}
+
 async function buildBrandedCaptureCanvas() {
   const video = $("video") || document.querySelector("video");
   if (!video) throw new Error("No encuentro <video>.");
 
-  const overlay = $("canvas") || document.querySelector("canvas");
+  const overlay = getOverlayCanvas();
   const c = window.__client || {};
 
   const lens =
@@ -1656,10 +1694,11 @@ async function buildBrandedCaptureCanvas() {
   const vw = video.videoWidth || 720;
   const vh = video.videoHeight || 1280;
 
-  const maxW = isMobile() ? 900 : 1600; // ✅ más bajo en móvil para evitar OOM
+  // ✅ más bajo en móvil para evitar OOM
+  const maxW = isMobile() ? 720 : 1600;
   const scale = Math.min(1, maxW / vw);
-  const W = Math.round(vw * scale);
-  const H = Math.round(vh * scale);
+  const W = Math.max(1, Math.round(vw * scale));
+  const H = Math.max(1, Math.round(vh * scale));
 
   const cnv = document.createElement("canvas");
   cnv.width = W;
@@ -1707,9 +1746,9 @@ async function buildBrandedCaptureCanvas() {
   }
 
   // 5) texto lente (✅ prioriza nombre_modelo)
-  const lensName = String(
-    lens?.nombre_modelo || lens?.nombre || lens?.name || lens?.modelo || lens?.model || ""
-  ).trim() || `SKU ${String(lens?.sku || "").trim()}`;
+  const lensName =
+    (String(lens?.nombre_modelo || lens?.nombre || lens?.name || lens?.modelo || lens?.model || "").trim()) ||
+    (String(lens?.sku || lens?.SKU || "").trim() ? `SKU ${String(lens?.sku || lens?.SKU || "").trim()}` : "Modelo");
 
   const [line1, line2] = splitTwoLines(lensName, 28);
 
@@ -1766,25 +1805,26 @@ async function doCapture() {
     const file = new File([blob], `facelens_${Date.now()}.png`, { type: "image/png" });
 
     // ✅ móvil: share si se puede
-    const canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }));
+    const canShare = !!(navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] })));
     if (canShare) {
       await navigator.share({ files: [file], title: "FaceLens", text: "Mi prueba con FaceLens" });
       return;
     }
 
-    // ✅ PC (y fallback móvil): descargar
+    // ✅ descarga (PC y fallback móvil)
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `facelens_${Date.now()}.png`;
+    a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
 
-    // si el navegador bloquea download (algunos móviles), abrimos
+    // fallback extra: si el navegador no descarga, abrimos
     setTimeout(() => {
-      try { window.open(url, "_blank"); } catch {}
-    }, 350);
+      try { window.open(url, "_blank", "noopener"); } catch {}
+    }, 300);
 
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {
@@ -1818,8 +1858,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
     this.closePath();
     return this;
   };
-}
-/* =========================
+}/* =========================
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
 function startAR() {
