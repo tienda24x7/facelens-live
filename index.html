@@ -90,7 +90,8 @@
   #modelName { flex:1; text-align:center; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
 
   /* =========================
-     ✅ FIX POPUP ONBOARDING (clickeable + centrado)
+     ✅ FIX POPUP ONBOARDING (clickeable + centrado + botones prolijos)
+     (cambios quirúrgicos: NO toca el resto)
   ========================= */
   #onboardOverlay{
     display:none;
@@ -103,8 +104,35 @@
     background:rgba(0,0,0,.72);
     pointer-events:auto;           /* ✅ permite click */
   }
-  #onboardCard{ pointer-events:auto; } /* ✅ permite click dentro */
-  #onboardBtn, #onboardLater{ pointer-events:auto; }
+
+  /* ✅ card: ancho razonable + padding consistente */
+  #onboardCard{
+    pointer-events:auto;           /* ✅ permite click dentro */
+    width:min(560px, 92vw);
+    max-width:92vw;
+    border-radius:16px;
+    padding:16px 16px 14px;
+    background:rgba(20,20,20,.92);
+    box-shadow:0 10px 40px rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.08);
+  }
+
+  /* ✅ botónera: centrada y con wrap */
+  #onboardActions{
+    margin-top:12px;
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    align-items:center;
+    flex-wrap:wrap;
+    pointer-events:auto;
+  }
+
+  /* ✅ botones: clickeables y con tamaño cómodo */
+  #onboardBtn, #onboardLater{
+    pointer-events:auto;
+    min-width:140px;
+  }
 
   /* ... resto de tu CSS sin cambios ... */
   </style>
@@ -1804,14 +1832,18 @@ async function doCapture() {
 
     const file = new File([blob], `facelens_${Date.now()}.png`, { type: "image/png" });
 
-    // ✅ móvil: share si se puede
-    const canShare = !!(navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] })));
-    if (canShare) {
+    // ✅ SHARE SOLO EN MÓVIL (evita “Compartir / Editar” en PC)
+    const canShareMobile =
+      isMobile() &&
+      !!navigator.share &&
+      (!navigator.canShare || navigator.canShare({ files: [file] }));
+
+    if (canShareMobile) {
       await navigator.share({ files: [file], title: "FaceLens", text: "Mi prueba con FaceLens" });
       return;
     }
 
-    // ✅ descarga (PC y fallback móvil)
+    // ✅ PC: descarga directa (sin window.open)
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1821,10 +1853,12 @@ async function doCapture() {
     a.click();
     document.body.removeChild(a);
 
-    // fallback extra: si el navegador no descarga, abrimos
-    setTimeout(() => {
-      try { window.open(url, "_blank", "noopener"); } catch {}
-    }, 300);
+    // ✅ móvil fallback (si no comparte): abrir imagen
+    if (isMobile()) {
+      setTimeout(() => {
+        try { window.open(url, "_blank", "noopener"); } catch {}
+      }, 250);
+    }
 
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {
@@ -1858,7 +1892,8 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
     this.closePath();
     return this;
   };
-}/* =========================
+}}
+/* =========================
    7) AR (FaceMesh + suavizado + zoom robusto en móvil sin romper PC)
 ========================= */
 function startAR() {
