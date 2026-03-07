@@ -349,11 +349,20 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 /* =========================
    1) SLUG
 ========================= */
+const __urlParams = new URLSearchParams(location.search);
+
 const slug =
-  new URLSearchParams(location.search).get("slug") ||
+  __urlParams.get("slug") ||
   (location.pathname || "/").replace(/^\/+|\/+$/g, "") ||
   "tienda24x7_demo";
 
+// ✅ NUEVO: SKU pedido por deep link
+const requestedSkuRaw = __urlParams.get("sku") || "";
+const requestedSku = String(requestedSkuRaw || "").trim();
+
+// flags de control para no re-aplicar el deep link todo el tiempo
+let __requestedSkuHandled = false;
+let __requestedSkuFound = false;
 /* =========================
    2) UI (robusto)
 ========================= */
@@ -399,6 +408,65 @@ let currentIndex = 0;
 
 let lensImg = null;
 let lensImgReady = false;
+/* =========================
+   ✅ DEEP LINK por SKU
+   - Permite abrir directo un lente con ?slug=...&sku=...
+========================= */
+function normalizeSkuForMatch(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/[_-]/g, "");
+}
+
+function getLensSkuValue(lens) {
+  return String(
+    lens?.sku ||
+    lens?.SKU ||
+    lens?.codigo ||
+    lens?.id_sku ||
+    ""
+  ).trim();
+}
+
+function findLensIndexBySku(arr, sku) {
+  const wanted = normalizeSkuForMatch(sku);
+  if (!wanted || !Array.isArray(arr) || !arr.length) return -1;
+
+  for (let i = 0; i < arr.length; i++) {
+    const lensSku = normalizeSkuForMatch(getLensSkuValue(arr[i]));
+    if (lensSku && lensSku === wanted) return i;
+  }
+
+  return -1;
+}
+
+function applyRequestedSkuSelection() {
+  if (__requestedSkuHandled) return;
+  __requestedSkuHandled = true;
+
+  if (!requestedSku) return;
+
+  const idx = findLensIndexBySku(lentesFiltrados, requestedSku);
+
+  if (idx >= 0) {
+    currentIndex = idx;
+    __requestedSkuFound = true;
+    console.log("DEEP LINK SKU ✅ encontrado", {
+      requestedSku,
+      idx,
+      lens: lentesFiltrados[idx]
+    });
+    return;
+  }
+
+  __requestedSkuFound = false;
+  console.warn("DEEP LINK SKU ⚠️ no encontrado en este cliente/catálogo", {
+    slug,
+    requestedSku
+  });
+}
 
 /* =========================
    4) CARGA CONFIG (cliente + lentes por plan)
@@ -699,14 +767,18 @@ function aplicarFiltro() {
   if (!lentesFiltrados.length) {
     modelNameEl.textContent = "Sin lentes en esta categoría";
     lensImgReady = false;
-    productBtn.classList.add("hidden");
-    productBtn.onclick = null;
+    if (productBtn) {
+      productBtn.classList.add("hidden");
+      productBtn.onclick = null;
+    }
     return;
   }
 
-  loadCurrentLens();
-}
+  // ✅ si vino sku en la URL, intentamos posicionarnos en ese lente una sola vez
+  applyRequestedSkuSelection();
 
+  loadCurrentLens().catch(err => console.warn("loadCurrentLens aplicarFiltro error:", err));
+}
 categoryFilter.onchange = aplicarFiltro;
 
 /* =========================
@@ -1360,10 +1432,18 @@ async function loadCurrentLens() {
 
   const lens = lentesFiltrados[safeIndex];
 
-  // ✅ guardamos referencia global (útil para otras features)
+    // ✅ guardamos referencia global (útil para otras features)
   window.__currentLens = lens;
 
-  modelNameEl.textContent = lens?.nombre_modelo || lens?.nombre || "Modelo";
+  const baseModelName = lens?.nombre_modelo || lens?.nombre || "Modelo";
+
+  // ✅ si vino un sku por URL y no existía, avisamos una sola vez
+  if (requestedSku && __requestedSkuHandled && !__requestedSkuFound) {
+    modelNameEl.textContent = `${baseModelName} · SKU solicitado no encontrado`;
+    __requestedSkuFound = true; // evitamos que quede el aviso permanente al navegar
+  } else {
+    modelNameEl.textContent = baseModelName;
+  }
 
   // ✅ EVENTO: lens_view (solo si cambió realmente)
   try {
