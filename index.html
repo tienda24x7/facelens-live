@@ -135,6 +135,104 @@
   }
 
   /* ... resto de tu CSS sin cambios ... */
+  
+
+  /* =========================
+     ✅ NOTICE: navegador interno IG / FB
+  ========================= */
+  #inAppBrowserNotice{
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:100000;
+    background:rgba(0,0,0,.82);
+    backdrop-filter:blur(4px);
+    padding:20px;
+    align-items:center;
+    justify-content:center;
+  }
+
+  #inAppBrowserCard{
+    width:min(560px, 92vw);
+    max-width:92vw;
+    border-radius:18px;
+    padding:20px;
+    background:rgba(17,24,39,.96);
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 10px 40px rgba(0,0,0,.45);
+    color:#fff;
+  }
+
+  #inAppBrowserTitle{
+    font-size:22px;
+    font-weight:800;
+    line-height:1.2;
+    margin-bottom:10px;
+  }
+
+  #inAppBrowserText{
+    font-size:15px;
+    line-height:1.55;
+    color:rgba(255,255,255,.84);
+    margin-bottom:16px;
+  }
+
+  #inAppBrowserBox{
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:12px;
+    padding:12px 14px;
+    margin-bottom:16px;
+  }
+
+  #inAppBrowserBoxTitle{
+    font-size:14px;
+    font-weight:700;
+    margin-bottom:8px;
+  }
+
+  #inAppBrowserBoxText{
+    font-size:14px;
+    line-height:1.55;
+    color:rgba(255,255,255,.84);
+  }
+
+  #inAppBrowserActions{
+    display:grid;
+    gap:10px;
+  }
+
+  #iabCopyLinkBtn{
+    width:100%;
+    padding:13px 14px;
+    border-radius:12px;
+    border:0;
+    background:#ffffff;
+    color:#111827;
+    font-weight:800;
+    font-size:15px;
+    cursor:pointer;
+  }
+
+  #iabContinueBtn{
+    width:100%;
+    padding:13px 14px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.06);
+    color:#ffffff;
+    font-weight:800;
+    font-size:15px;
+    cursor:pointer;
+  }
+
+  #iabCopyMsg{
+    display:none;
+    margin-top:12px;
+    font-size:13px;
+    color:#86efac;
+  }
+
   </style>
 </head>
 <body>
@@ -166,6 +264,34 @@
         <button id="onboardLater" type="button">No mostrar más</button>
         <button id="onboardBtn" type="button">Entendido</button>
       </div>
+    </div>
+  </div>
+
+
+  <!-- ✅ NOTICE: navegador interno Instagram / Facebook -->
+  <div id="inAppBrowserNotice">
+    <div id="inAppBrowserCard">
+      <div id="inAppBrowserTitle">Para usar FaceLens mejor, abrí este link en tu navegador</div>
+
+      <div id="inAppBrowserText">
+        Detectamos que abriste el probador desde el navegador interno de Instagram o Facebook.
+        En ese modo, la cámara puede fallar o verse mal.
+      </div>
+
+      <div id="inAppBrowserBox">
+        <div id="inAppBrowserBoxTitle">Recomendación</div>
+        <div id="inAppBrowserBoxText">
+          Tocá los <b>3 puntitos</b> arriba a la derecha y elegí <b>“Abrir en navegador”</b>
+          o <b>“Abrir en Chrome”</b>.
+        </div>
+      </div>
+
+      <div id="inAppBrowserActions">
+        <button id="iabCopyLinkBtn" type="button">Copiar link</button>
+        <button id="iabContinueBtn" type="button">Continuar acá igualmente</button>
+      </div>
+
+      <div id="iabCopyMsg">Link copiado. Pegalo en Chrome o en tu navegador.</div>
     </div>
   </div>
 
@@ -2406,11 +2532,102 @@ async function initDashboardIfNeeded() {
   await loadDashboardData(cliente);
   return true;
 }
+
+
+/* =========================
+   ✅ NOTICE: navegador interno Instagram / Facebook
+========================= */
+function getUserAgentSafe() {
+  return navigator.userAgent || navigator.vendor || window.opera || "";
+}
+
+function isInstagramInAppBrowser() {
+  const ua = getUserAgentSafe().toLowerCase();
+  return ua.includes("instagram");
+}
+
+function isFacebookInAppBrowser() {
+  const ua = getUserAgentSafe().toLowerCase();
+  return ua.includes("fbav") || ua.includes("fban") || ua.includes("facebook");
+}
+
+function isInAppSocialBrowser() {
+  return isInstagramInAppBrowser() || isFacebookInAppBrowser();
+}
+
+async function copyCurrentUrlSafe() {
+  const url = window.location.href;
+
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+      return true;
+    }
+  } catch (_) {}
+
+  try {
+    const input = document.createElement("textarea");
+    input.value = url;
+    input.setAttribute("readonly", "");
+    input.style.position = "absolute";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    document.body.removeChild(input);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function setupInAppBrowserNotice() {
+  const wrap = document.getElementById("inAppBrowserNotice");
+  const copyBtn = document.getElementById("iabCopyLinkBtn");
+  const continueBtn = document.getElementById("iabContinueBtn");
+  const copyMsg = document.getElementById("iabCopyMsg");
+
+  if (!wrap || !copyBtn || !continueBtn) return;
+
+  copyBtn.onclick = async () => {
+    const ok = await copyCurrentUrlSafe();
+    if (ok) {
+      if (copyMsg) copyMsg.style.display = "block";
+    } else {
+      alert("No pude copiar el link automáticamente. Copialo desde la barra de direcciones.");
+    }
+  };
+
+  continueBtn.onclick = () => {
+    wrap.style.display = "none";
+    try {
+      sessionStorage.setItem("facelens_iab_notice_dismissed", "1");
+    } catch (_) {}
+  };
+}
+
+function maybeShowInAppBrowserNotice() {
+  const wrap = document.getElementById("inAppBrowserNotice");
+  if (!wrap) return;
+
+  let dismissed = false;
+  try {
+    dismissed = sessionStorage.getItem("facelens_iab_notice_dismissed") === "1";
+  } catch (_) {}
+
+  if (isInAppSocialBrowser() && !dismissed) {
+    wrap.style.display = "flex";
+  }
+}
+
 /* =========================
      INIT
 ========================= */
 (async function () {
   try {
+    setupInAppBrowserNotice();
+    maybeShowInAppBrowserNotice();
+
     console.log("INIT ✅ arrancó");
 
     if (typeof loadClientConfig !== "function") {
