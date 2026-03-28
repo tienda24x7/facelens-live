@@ -416,6 +416,374 @@
 
   <script>
 /* =========================
+   🌐 I18N BASE
+   - fuente: cliente.locale
+   - idiomas: es / en / pt-BR
+   - fallback: es
+========================= */
+const I18N = {
+  es: {
+    categories: {
+      all: "Todos",
+      clasicos: "Clásicos",
+      degrade: "Degradé",
+      espejados: "Espejados",
+      polarizados: "Polarizados",
+      ferrari: "Ferrari",
+    },
+    ui: {
+      loading: "Cargando…",
+      capture: "📸 Captura",
+      saveA: "⭐ Guardar A",
+      saveB: "⭐ Guardar B",
+      product: "🛒 Ver producto",
+      productShort: "🛒 Ver",
+      goStore: "🏠 Ir a la tienda",
+      ask: "💬 Consultar",
+      clear: "🗑️ Limpiar",
+      noLensesCatalog: "Sin lentes disponibles para este catálogo",
+      noLensesCategory: "Sin lentes en esta categoría",
+      requestedSkuNotFound: "SKU solicitado no encontrado",
+      modelFallback: "Modelo",
+    },
+    onboarding: {
+      title: "Probador virtual FaceLens",
+      line1: "Permití la cámara cuando te lo pida el navegador.",
+      line2: "Ubicá tu cara centrada y con buena luz.",
+      line3Prefix: "Distancia sugerida:",
+      line3Text: "30–45 cm del dispositivo (a la altura de los ojos).",
+      line4: "Usá ◀ ▶ para cambiar modelos y “🛒 Ver producto” para consultar.",
+      hint: "Tip: si el lente “baila”, mejorá la luz o mirá de frente a la cámara.",
+      never: "No mostrar más",
+      ok: "Entendido",
+    },
+    iab: {
+      title: "Para usar FaceLens mejor, abrí este link en tu navegador",
+      text: "Detectamos que abriste el probador desde el navegador interno de Instagram o Facebook. En ese modo, la cámara puede fallar o verse mal.",
+      boxTitle: "Recomendación",
+      boxText: "Tocá los 3 puntitos arriba a la derecha y elegí “Abrir en navegador” o “Abrir en Chrome”.",
+      copy: "Copiar link",
+      continue: "Continuar acá igualmente",
+      copied: "Link copiado. Pegalo en Chrome o en tu navegador.",
+    },
+    search: {
+      title: "Buscar modelo",
+      placeholder: "Escribí modelo, color o SKU…",
+      hint: "Tip: podés buscar por “Rayban”, “degradé”, o el número de SKU.",
+      emptyCategory: "No hay lentes cargados en esta categoría.",
+      noResults: "Sin resultados. Probá con otra palabra o SKU.",
+      sku: "SKU",
+      cat: "Cat",
+    },
+    dashboard: {
+      title: "Dashboard",
+      loading: "Cargando…",
+      today: "Hoy",
+      days7: "7 días",
+      days30: "30 días",
+      refresh: "↻ Actualizar",
+      uniqueUsers: "Usuarios únicos",
+      sessions: "Sesiones",
+      productClicks: "Clicks Ver producto",
+      captureClicks: "Clicks Captura",
+      topLenses: "Top lentes probados",
+    },
+    captureFlow: {
+      scanToSee: "Escaneá para ver",
+      shareTitle: "FaceLens",
+      shareText: "Mi prueba con FaceLens",
+      error: "No se pudo generar la captura. Probá de nuevo o bajá la resolución del teléfono.",
+    },
+    whatsapp: {
+      askModel: "Hola! Quiero consultar por el modelo: {{model}}",
+      askAny: "Hola! Quiero consultar por un modelo de lentes.",
+    },
+  },
+  en: {
+    categories: {
+      all: "All",
+      clasicos: "Classic",
+      degrade: "Gradient",
+      espejados: "Mirrored",
+      polarizados: "Polarized",
+      ferrari: "Ferrari",
+    },
+    ui: {
+      loading: "Loading…",
+      capture: "📸 Capture",
+      saveA: "⭐ Save A",
+      saveB: "⭐ Save B",
+      product: "🛒 View product",
+      productShort: "🛒 View",
+      goStore: "🏠 Go to store",
+      ask: "💬 Ask",
+      clear: "🗑️ Clear",
+      noLensesCatalog: "No lenses available for this catalog",
+      noLensesCategory: "No lenses in this category",
+      requestedSkuNotFound: "Requested SKU not found",
+      modelFallback: "Model",
+    },
+    onboarding: {
+      title: "FaceLens virtual try-on",
+      line1: "Allow camera access when your browser asks for it.",
+      line2: "Keep your face centered and with good lighting.",
+      line3Prefix: "Suggested distance:",
+      line3Text: "30–45 cm from the device (at eye level).",
+      line4: "Use ◀ ▶ to change models and “🛒 View product” to check details.",
+      hint: "Tip: if the lenses look shaky, improve the lighting or face the camera directly.",
+      never: "Do not show again",
+      ok: "Got it",
+    },
+    iab: {
+      title: "For a better FaceLens experience, open this link in your browser",
+      text: "We detected that you opened the try-on from Instagram or Facebook’s in-app browser. In that mode, the camera may fail or work poorly.",
+      boxTitle: "Recommendation",
+      boxText: "Tap the 3 dots in the top right corner and choose “Open in browser” or “Open in Chrome”.",
+      copy: "Copy link",
+      continue: "Continue here anyway",
+      copied: "Link copied. Paste it into Chrome or your browser.",
+    },
+    search: {
+      title: "Search model",
+      placeholder: "Type model, color or SKU…",
+      hint: "Tip: you can search for “Rayban”, “gradient”, or the SKU number.",
+      emptyCategory: "There are no lenses loaded in this category.",
+      noResults: "No results. Try another word or SKU.",
+      sku: "SKU",
+      cat: "Cat",
+    },
+    dashboard: {
+      title: "Dashboard",
+      loading: "Loading…",
+      today: "Today",
+      days7: "7 days",
+      days30: "30 days",
+      refresh: "↻ Refresh",
+      uniqueUsers: "Unique users",
+      sessions: "Sessions",
+      productClicks: "Product clicks",
+      captureClicks: "Capture clicks",
+      topLenses: "Top tried lenses",
+    },
+    captureFlow: {
+      scanToSee: "Scan to view",
+      shareTitle: "FaceLens",
+      shareText: "My FaceLens try-on",
+      error: "Could not generate the capture. Please try again or lower the phone resolution.",
+    },
+    whatsapp: {
+      askModel: "Hi! I want to ask about this model: {{model}}",
+      askAny: "Hi! I want to ask about a lens model.",
+    },
+  },
+  "pt-BR": {
+    categories: {
+      all: "Todos",
+      clasicos: "Clássicos",
+      degrade: "Degradê",
+      espejados: "Espelhados",
+      polarizados: "Polarizados",
+      ferrari: "Ferrari",
+    },
+    ui: {
+      loading: "Carregando…",
+      capture: "📸 Captura",
+      saveA: "⭐ Salvar A",
+      saveB: "⭐ Salvar B",
+      product: "🛒 Ver produto",
+      productShort: "🛒 Ver",
+      goStore: "🏠 Ir para a loja",
+      ask: "💬 Consultar",
+      clear: "🗑️ Limpar",
+      noLensesCatalog: "Sem óculos disponíveis para este catálogo",
+      noLensesCategory: "Sem óculos nesta categoria",
+      requestedSkuNotFound: "SKU solicitado não encontrado",
+      modelFallback: "Modelo",
+    },
+    onboarding: {
+      title: "Provador virtual FaceLens",
+      line1: "Permita o acesso à câmera quando o navegador solicitar.",
+      line2: "Mantenha seu rosto centralizado e com boa iluminação.",
+      line3Prefix: "Distância sugerida:",
+      line3Text: "30–45 cm do dispositivo (na altura dos olhos).",
+      line4: "Use ◀ ▶ para trocar os modelos e “🛒 Ver produto” para consultar.",
+      hint: "Dica: se as lentes ficarem tremendo, melhore a iluminação ou olhe de frente para a câmera.",
+      never: "Não mostrar novamente",
+      ok: "Entendi",
+    },
+    iab: {
+      title: "Para usar o FaceLens melhor, abra este link no seu navegador",
+      text: "Detectamos que você abriu o provador no navegador interno do Instagram ou Facebook. Nesse modo, a câmera pode falhar ou funcionar mal.",
+      boxTitle: "Recomendação",
+      boxText: "Toque nos 3 pontinhos no canto superior direito e escolha “Abrir no navegador” ou “Abrir no Chrome”.",
+      copy: "Copiar link",
+      continue: "Continuar aqui mesmo",
+      copied: "Link copiado. Cole no Chrome ou no seu navegador.",
+    },
+    search: {
+      title: "Buscar modelo",
+      placeholder: "Digite modelo, cor ou SKU…",
+      hint: "Dica: você pode buscar por “Rayban”, “degradê” ou pelo número do SKU.",
+      emptyCategory: "Não há óculos carregados nesta categoria.",
+      noResults: "Nenhum resultado. Tente outra palavra ou SKU.",
+      sku: "SKU",
+      cat: "Cat",
+    },
+    dashboard: {
+      title: "Dashboard",
+      loading: "Carregando…",
+      today: "Hoje",
+      days7: "7 dias",
+      days30: "30 dias",
+      refresh: "↻ Atualizar",
+      uniqueUsers: "Usuários únicos",
+      sessions: "Sessões",
+      productClicks: "Cliques em Ver produto",
+      captureClicks: "Cliques em Captura",
+      topLenses: "Óculos mais testados",
+    },
+    captureFlow: {
+      scanToSee: "Escaneie para ver",
+      shareTitle: "FaceLens",
+      shareText: "Minha prova com FaceLens",
+      error: "Não foi possível gerar a captura. Tente novamente ou reduza a resolução do celular.",
+    },
+    whatsapp: {
+      askModel: "Olá! Quero consultar este modelo: {{model}}",
+      askAny: "Olá! Quero consultar um modelo de óculos.",
+    },
+  }
+};
+
+function normalizeLocale(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value) return "es";
+  if (value === "pt" || value === "pt-br" || value === "pt_br") return "pt-BR";
+  if (value === "en" || value.startsWith("en-")) return "en";
+  return "es";
+}
+
+function getCurrentLocale() {
+  return normalizeLocale(window.__client?.locale || window.__locale || "es");
+}
+
+function t(path, vars) {
+  const locale = getCurrentLocale();
+  const dict = I18N[locale] || I18N.es;
+  const fallback = I18N.es;
+
+  const getByPath = (obj, keyPath) =>
+    String(keyPath || "")
+      .split(".")
+      .reduce((acc, key) => (acc && acc[key] != null ? acc[key] : undefined), obj);
+
+  let value = getByPath(dict, path);
+  if (value == null) value = getByPath(fallback, path);
+  if (value == null) value = path;
+
+  let text = String(value);
+  if (vars && typeof vars === "object") {
+    Object.keys(vars).forEach((k) => {
+      text = text.replaceAll(`{{${k}}}`, String(vars[k] ?? ""));
+    });
+  }
+  return text;
+}
+
+function applyStaticTranslations() {
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+
+  const setHtml = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = value;
+  };
+
+  setText("onboardTitle", t("onboarding.title"));
+  setHtml(
+    "onboardList",
+    `
+      <li>${t("onboarding.line1")}</li>
+      <li>${t("onboarding.line2")}</li>
+      <li><b>${t("onboarding.line3Prefix")}</b> ${t("onboarding.line3Text")}</li>
+      <li>${t("onboarding.line4")}</li>
+    `
+  );
+  setText("onboardHint", t("onboarding.hint"));
+  setText("onboardLater", t("onboarding.never"));
+  setText("onboardBtn", t("onboarding.ok"));
+
+  setText("inAppBrowserTitle", t("iab.title"));
+  setText("inAppBrowserText", t("iab.text"));
+  setText("inAppBrowserBoxTitle", t("iab.boxTitle"));
+  setText("inAppBrowserBoxText", t("iab.boxText"));
+  setText("iabCopyLinkBtn", t("iab.copy"));
+  setText("iabContinueBtn", t("iab.continue"));
+  setText("iabCopyMsg", t("iab.copied"));
+
+  const categoryFilterEl = document.getElementById("categoryFilter");
+  if (categoryFilterEl) {
+    const currentValue = categoryFilterEl.value || "all";
+    categoryFilterEl.innerHTML = `
+      <option value="all">${t("categories.all")}</option>
+      <option value="clasicos">${t("categories.clasicos")}</option>
+      <option value="degrade">${t("categories.degrade")}</option>
+      <option value="espejados">${t("categories.espejados")}</option>
+      <option value="polarizados">${t("categories.polarizados")}</option>
+      <option value="ferrari">${t("categories.ferrari")}</option>
+    `;
+    categoryFilterEl.value = currentValue;
+  }
+
+  setText("modelName", t("ui.loading"));
+  const captureBtnEl = document.getElementById("captureBtn");
+  const compareABtnEl = document.getElementById("compareABtn");
+  const compareBBtnEl = document.getElementById("compareBBtn");
+  const productBtnEl = document.getElementById("productBtn");
+  const clearCompareEl = document.getElementById("clearCompare");
+  const searchBtnEl = document.getElementById("searchBtn");
+  const searchInputEl = document.getElementById("searchInput");
+
+  if (captureBtnEl) captureBtnEl.textContent = t("ui.capture");
+  if (compareABtnEl) compareABtnEl.textContent = t("ui.saveA");
+  if (compareBBtnEl) compareBBtnEl.textContent = t("ui.saveB");
+  if (productBtnEl) productBtnEl.textContent = t("ui.product");
+  if (clearCompareEl) clearCompareEl.textContent = t("ui.clear");
+
+  setText("searchTitle", t("search.title"));
+  if (searchInputEl) searchInputEl.placeholder = t("search.placeholder");
+  setText("searchHint", t("search.hint"));
+  if (searchBtnEl) searchBtnEl.title = t("search.title");
+
+  setText("dashTitle", t("dashboard.title"));
+  setText("dashSub", t("dashboard.loading"));
+
+  const dashRange = document.getElementById("dashRange");
+  if (dashRange) {
+    const currentValue = dashRange.value || "7";
+    dashRange.innerHTML = `
+      <option value="1">${t("dashboard.today")}</option>
+      <option value="7">${t("dashboard.days7")}</option>
+      <option value="30">${t("dashboard.days30")}</option>
+    `;
+    dashRange.value = currentValue;
+  }
+
+  setText("dashRefresh", t("dashboard.refresh"));
+
+  const dashLabels = document.querySelectorAll("#dashGrid .dashLabel");
+  if (dashLabels[0]) dashLabels[0].textContent = t("dashboard.uniqueUsers");
+  if (dashLabels[1]) dashLabels[1].textContent = t("dashboard.sessions");
+  if (dashLabels[2]) dashLabels[2].textContent = t("dashboard.productClicks");
+  if (dashLabels[3]) dashLabels[3].textContent = t("dashboard.captureClicks");
+  if (dashLabels[4]) dashLabels[4].textContent = t("dashboard.topLenses");
+}
+</script>
+
+<script>
+/* =========================
    ✅ ONBOARDING OVERLAY (1ra vez por dispositivo) - FIX CLICK/OVERLAP
    - Fuerza overlay arriba de todo y clickeable
    - Asegura que los botones reciban click
@@ -769,6 +1137,9 @@ async function loadClientConfig() {
 
   // ✅ Cliente global
   window.__client = cliente || {};
+  window.__client.locale = normalizeLocale(window.__client.locale || "es");
+  window.__locale = window.__client.locale;
+  applyStaticTranslations();
   window.__client.whatsapp_norm = normalizeWhatsApp(window.__client.whatsapp || window.__client.WhatsApp || "");
 
   // ✅ FIX: default_url NO se pisa si ya viene del cliente
@@ -833,7 +1204,7 @@ async function loadClientConfig() {
   } catch {}
 
   if (!lentes.length) {
-    modelNameEl.textContent = "Sin lentes disponibles para este catálogo";
+    modelNameEl.textContent = t("ui.noLensesCatalog");
   }
 
   console.log("CLIENTE GLOBAL ✅", window.__client);
@@ -891,7 +1262,7 @@ function aplicarFiltro() {
   currentIndex = 0;
 
   if (!lentesFiltrados.length) {
-    modelNameEl.textContent = "Sin lentes en esta categoría";
+    modelNameEl.textContent = t("ui.noLensesCategory");
     lensImgReady = false;
     if (productBtn) {
       productBtn.classList.add("hidden");
@@ -960,7 +1331,7 @@ function renderSearchResults(q){
   // base: siempre usamos lo filtrado por categoría (lentesFiltrados)
   const arr = Array.isArray(lentesFiltrados) ? lentesFiltrados : [];
   if (!arr.length){
-    searchResults.innerHTML = `<div class="searchEmpty">No hay lentes cargados en esta categoría.</div>`;
+    searchResults.innerHTML = `<div class="searchEmpty">${t("search.emptyCategory")}</div>`;
     return;
   }
 
@@ -981,7 +1352,7 @@ function renderSearchResults(q){
   }
 
   if (!matches.length){
-    searchResults.innerHTML = `<div class="searchEmpty">Sin resultados. Probá con otra palabra o SKU.</div>`;
+    searchResults.innerHTML = `<div class="searchEmpty">${t("search.noResults")}</div>`;
     return;
   }
 
@@ -989,7 +1360,7 @@ function renderSearchResults(q){
     const name = lensDisplayName(l);
     const sku = lensSku(l);
     const cat = String(l?.categoria || "").trim();
-    const meta = [sku && `SKU: ${sku}`, cat && `Cat: ${cat}`].filter(Boolean).join(" • ");
+    const meta = [sku && `${t("search.sku")}: ${sku}`, cat && `${t("search.cat")}: ${cat}`].filter(Boolean).join(" • ");
     return `
       <div class="searchItem" data-idx="${idx}">
         <div style="flex:1;">
@@ -1189,8 +1560,8 @@ function buildWhatsAppUrl(phone, lens) {
 
   const model = String(lens?.nombre_modelo || lens?.nombre || "").trim();
   const msg = model
-    ? `Hola! Quiero consultar por el modelo: ${model}`
-    : `Hola! Quiero consultar por un modelo de lentes.`;
+    ? t("whatsapp.askModel", { model })
+    : t("whatsapp.askAny");
 
   return `https://wa.me/${p}?text=${encodeURIComponent(msg)}`;
 }
@@ -1561,11 +1932,11 @@ async function loadCurrentLens() {
     // ✅ guardamos referencia global (útil para otras features)
   window.__currentLens = lens;
 
-  const baseModelName = lens?.nombre_modelo || lens?.nombre || "Modelo";
+  const baseModelName = lens?.nombre_modelo || lens?.nombre || t("ui.modelFallback");
 
   // ✅ si vino un sku por URL y no existía, avisamos una sola vez
   if (requestedSku && __requestedSkuHandled && !__requestedSkuFound) {
-    modelNameEl.textContent = `${baseModelName} · SKU solicitado no encontrado`;
+    modelNameEl.textContent = `${baseModelName} · ${t("ui.requestedSkuNotFound")}`;
     __requestedSkuFound = true; // evitamos que quede el aviso permanente al navegar
   } else {
     modelNameEl.textContent = baseModelName;
@@ -1593,13 +1964,13 @@ async function loadCurrentLens() {
   let btnKind = ""; // product | store | whatsapp
 
   if (resolved.urlProducto) {
-    btnLabel = "🛒 Ver producto";
+    btnLabel = t("ui.product");
     btnKind = "product";
   } else if (resolved.urlHome) {
-    btnLabel = "🏠 Ir a la tienda";
+    btnLabel = t("ui.goStore");
     btnKind = "store";
   } else if (resolved.urlWa) {
-    btnLabel = "💬 Consultar";
+    btnLabel = t("ui.ask");
     btnKind = "whatsapp";
   }
 
@@ -1622,7 +1993,7 @@ async function loadCurrentLens() {
       productBtnSafe.style.alignItems = "center";
       productBtnSafe.style.justifyContent = "center";
 
-      productBtnSafe.textContent = btnLabel || "🛒 Ver";
+      productBtnSafe.textContent = btnLabel || t("ui.productShort");
 
       productBtnSafe.onclick = () => {
         __anaTrack("product_click", lens, {
@@ -2023,7 +2394,7 @@ async function buildBrandedCaptureCanvas() {
     ctx.save();
     ctx.fillStyle = "white";
     ctx.font = `${Math.round(16 * scale)}px Arial`;
-    ctx.fillText("Escaneá para ver", qrX - Math.round(6 * scale), qrY + qrSize + Math.round(26 * scale));
+    ctx.fillText(t("captureFlow.scanToSee"), qrX - Math.round(6 * scale), qrY + qrSize + Math.round(26 * scale));
     ctx.restore();
   }
 
@@ -2045,7 +2416,7 @@ async function doCapture() {
       (!navigator.canShare || navigator.canShare({ files: [file] }));
 
     if (canShareMobile) {
-      await navigator.share({ files: [file], title: "FaceLens", text: "Mi prueba con FaceLens" });
+      await navigator.share({ files: [file], title: t("captureFlow.shareTitle"), text: t("captureFlow.shareText") });
       return;
     }
 
@@ -2069,7 +2440,7 @@ async function doCapture() {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {
     console.warn("❌ Captura falló:", e);
-    alert("No se pudo generar la captura. Probá de nuevo o bajá la resolución del teléfono.");
+    alert(t("captureFlow.error"));
   }
 }
 
