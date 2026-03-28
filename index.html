@@ -2417,7 +2417,18 @@ function makeQrCanvasLocal(text, size = 220) {
 async function resolveBestUrlForLens(lens) {
   const c = window.__client || {};
 
-  // 1) product_url por SKU (override)
+  try {
+    if (typeof __resolveFinalUrlForLens === "function") {
+      const idxFromFiltered = Array.isArray(lentesFiltrados) ? lentesFiltrados.indexOf(lens) : -1;
+      const idxFromAll = idxFromFiltered >= 0 ? idxFromFiltered : (Array.isArray(lentes) ? lentes.indexOf(lens) : -1);
+      const idx = Number.isFinite(idxFromAll) && idxFromAll >= 0 ? idxFromAll : Number(currentIndex || 0);
+      const resolved = await __resolveFinalUrlForLens(lens, idx);
+      const finalUrl = String(resolved?.finalUrl || "").trim();
+      if (finalUrl) return finalUrl;
+    }
+  } catch {}
+
+  // 1) product_url por SKU (override / lens fields)
   let url = "";
   try {
     if (typeof __getProductUrlOverrideForLens === "function") {
@@ -2425,6 +2436,9 @@ async function resolveBestUrlForLens(lens) {
       url = String(url).trim();
     }
   } catch {}
+  if (!url && typeof pickFirstUrl === "function") {
+    url = String(pickFirstUrl(lens) || "").trim();
+  }
   if (url) return url;
 
   // 2) default_url (home)
@@ -2436,6 +2450,13 @@ async function resolveBestUrlForLens(lens) {
   if (wa) return `https://wa.me/${wa}`;
 
   return "";
+}
+
+function buildCaptureShareText(bestUrl) {
+  const base = String(t("captureFlow.shareText") || "").trim();
+  const url = String(bestUrl || "").trim();
+  return url ? `${base}
+${url}` : base;
 }
 
 // ✅ detecta overlay canvas real SIN apuntar al canvas que vamos a exportar
@@ -2572,6 +2593,18 @@ async function buildBrandedCaptureCanvas() {
 
 async function doCapture() {
   try {
+    const lens =
+      window.__currentLens ||
+      window.__selectedLens ||
+      window.__lens ||
+      window.selectedLens ||
+      (Array.isArray(lentesFiltrados) && lentesFiltrados[currentIndex]) ||
+      (Array.isArray(lentes) && lentes[currentIndex]) ||
+      null;
+
+    const bestUrl = await resolveBestUrlForLens(lens);
+    const shareText = buildCaptureShareText(bestUrl);
+
     const cnv = await buildBrandedCaptureCanvas();
     const blob = await canvasToBlobSafe(cnv);
     if (!blob) throw new Error("No pude generar la imagen (blob null).");
@@ -2579,13 +2612,19 @@ async function doCapture() {
     const file = new File([blob], `facelens_${Date.now()}.png`, { type: "image/png" });
 
     // ✅ SHARE SOLO EN MÓVIL (evita “Compartir / Editar” en PC)
+    const shareData = {
+      files: [file],
+      title: t("captureFlow.shareTitle"),
+      text: shareText,
+    };
+
     const canShareMobile =
       isMobile() &&
       !!navigator.share &&
-      (!navigator.canShare || navigator.canShare({ files: [file] }));
+      (!navigator.canShare || navigator.canShare(shareData));
 
     if (canShareMobile) {
-      await navigator.share({ files: [file], title: t("captureFlow.shareTitle"), text: t("captureFlow.shareText") });
+      await navigator.share(shareData);
       return;
     }
 
