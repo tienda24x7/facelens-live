@@ -453,11 +453,6 @@
   <!-- Filtro -->
   <select id="categoryFilter" style="width:100%;">
     <option value="all">Todos</option>
-    <option value="clasicos">Clásicos</option>
-    <option value="degrade">Degradé</option>
-    <option value="espejados">Espejados</option>
-    <option value="polarizados">Polarizados</option>
-    <option value="ferrari">Ferrari</option>
   </select>
 
   <!-- Navegación -->
@@ -844,6 +839,48 @@ function t(path, vars) {
   return text;
 }
 
+function normalizeCategoryValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getDynamicCategoriesFromLentes(items) {
+  const arr = Array.isArray(items) ? items : [];
+  return [...new Set(
+    arr
+      .map((l) => String(l?.categoria || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, getCurrentLocale()));
+}
+
+function rebuildCategoryFilterOptions(preferredValue) {
+  const categoryFilterEl = document.getElementById("categoryFilter");
+  if (!categoryFilterEl) return;
+
+  const categories = getDynamicCategoriesFromLentes(window.lentes || lentes || []);
+  const wanted = normalizeCategoryValue(preferredValue || categoryFilterEl.value || "all");
+
+  categoryFilterEl.innerHTML = [
+    `<option value="all">${escapeHtml(t("categories.all"))}</option>`,
+    ...categories.map((cat) => {
+      const value = normalizeCategoryValue(cat);
+      return `<option value="${escapeHtml(value)}">${escapeHtml(cat)}</option>`;
+    })
+  ].join("");
+
+  const availableValues = new Set(["all", ...categories.map((cat) => normalizeCategoryValue(cat))]);
+  categoryFilterEl.value = availableValues.has(wanted) ? wanted : "all";
+}
+
+
 function applyStaticTranslations() {
   const setText = (id, value) => {
     const el = document.getElementById(id);
@@ -880,15 +917,7 @@ function applyStaticTranslations() {
   const categoryFilterEl = document.getElementById("categoryFilter");
   if (categoryFilterEl) {
     const currentValue = categoryFilterEl.value || "all";
-    categoryFilterEl.innerHTML = `
-      <option value="all">${t("categories.all")}</option>
-      <option value="clasicos">${t("categories.clasicos")}</option>
-      <option value="degrade">${t("categories.degrade")}</option>
-      <option value="espejados">${t("categories.espejados")}</option>
-      <option value="polarizados">${t("categories.polarizados")}</option>
-      <option value="ferrari">${t("categories.ferrari")}</option>
-    `;
-    categoryFilterEl.value = currentValue;
+    rebuildCategoryFilterOptions(currentValue);
   }
 
   setText("modelName", t("ui.loading"));
@@ -1357,6 +1386,13 @@ async function loadClientConfig() {
     }
   } catch {}
 
+  try {
+    window.lentes = lentes;
+    rebuildCategoryFilterOptions();
+  } catch (e) {
+    console.warn("No pude reconstruir categorías dinámicas:", e);
+  }
+
   if (!lentes.length) {
     modelNameEl.textContent = t("ui.noLensesCatalog");
   }
@@ -1403,13 +1439,13 @@ async function loadClientConfig() {
 })();
 
 function aplicarFiltro() {
-  const categoria = (categoryFilter?.value || "all").toLowerCase().trim();
+  const categoria = normalizeCategoryValue(categoryFilter?.value || "all");
 
   if (categoria === "all") {
     lentesFiltrados = [...lentes];
   } else {
     lentesFiltrados = lentes.filter(l =>
-      String(l.categoria || "").toLowerCase().trim() === categoria
+      normalizeCategoryValue(l.categoria) === categoria
     );
   }
 
@@ -1909,7 +1945,8 @@ function getLensFolderForClientPrimary() {
 
   const scope = scopeRaw.toUpperCase();
 
-  if (scope === "ALL" || scope === "NICOLAS" || scope === "EZEQUIEL") return scope;
+  // ✅ si el cliente tiene catalog_scope, usarlo siempre
+  if (scope) return scope;
 
   const byClient = getLensFolderForClient();
   if (byClient && byClient !== "default") return byClient;
