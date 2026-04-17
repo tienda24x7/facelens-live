@@ -643,6 +643,28 @@ const I18N = {
       shareText: "Mi prueba con FaceLens",
       error: "No se pudo generar la captura. Probá de nuevo o bajá la resolución del teléfono.",
     },
+    compare: {
+      saveA: "A",
+      saveB: "B",
+      empty: "—",
+    },
+    dashboardExtra: {
+      titleWithName: "Dashboard · {{name}}",
+      slugLabel: "Slug: {{slug}}",
+      clientFallback: "Cliente",
+      noSlug: "No hay slug de cliente.",
+      readError: "No pude leer eventos. Revisá permisos (RLS) o políticas de lectura.",
+      usersHint24h: "últimas 24h",
+      usersHintDays: "últimos {{days}} días",
+      sessionsHint: "reingresos est.: {{count}}",
+      productClicksHint: "clics en 🛒",
+      captureClicksHint: "clics en 📸",
+      noTopData: "Todavía no hay datos de lentes probados en este período.",
+    },
+    system: {
+      copyLinkManual: "No pude copiar el link automáticamente. Copialo desde la barra de direcciones.",
+      initError: "No pude iniciar FaceLens correctamente.",
+    },
     whatsapp: {
       askModel: "Hola! Quiero consultar por el modelo: {{model}}",
       askAny: "Hola! Quiero consultar por un modelo de lentes.",
@@ -720,6 +742,28 @@ const I18N = {
       shareText: "My FaceLens try-on",
       error: "Could not generate the capture. Please try again or lower the phone resolution.",
     },
+    compare: {
+      saveA: "A",
+      saveB: "B",
+      empty: "—",
+    },
+    dashboardExtra: {
+      titleWithName: "Dashboard · {{name}}",
+      slugLabel: "Slug: {{slug}}",
+      clientFallback: "Client",
+      noSlug: "No client slug was found.",
+      readError: "I couldn’t read events. Please check permissions (RLS) or read policies.",
+      usersHint24h: "last 24h",
+      usersHintDays: "last {{days}} days",
+      sessionsHint: "estimated re-entries: {{count}}",
+      productClicksHint: "clicks on 🛒",
+      captureClicksHint: "clicks on 📸",
+      noTopData: "There is no tried-lenses data for this period yet.",
+    },
+    system: {
+      copyLinkManual: "I couldn’t copy the link automatically. Please copy it from the address bar.",
+      initError: "I couldn’t start FaceLens correctly.",
+    },
     whatsapp: {
       askModel: "Hi! I want to ask about this model: {{model}}",
       askAny: "Hi! I want to ask about a lens model.",
@@ -796,6 +840,28 @@ const I18N = {
       shareTitle: "FaceLens",
       shareText: "Minha prova com FaceLens",
       error: "Não foi possível gerar a captura. Tente novamente ou reduza a resolução do celular.",
+    },
+    compare: {
+      saveA: "A",
+      saveB: "B",
+      empty: "—",
+    },
+    dashboardExtra: {
+      titleWithName: "Dashboard · {{name}}",
+      slugLabel: "Slug: {{slug}}",
+      clientFallback: "Cliente",
+      noSlug: "Não há slug de cliente.",
+      readError: "Não foi possível ler os eventos. Revise permissões (RLS) ou políticas de leitura.",
+      usersHint24h: "últimas 24h",
+      usersHintDays: "últimos {{days}} dias",
+      sessionsHint: "reentradas est.: {{count}}",
+      productClicksHint: "cliques em 🛒",
+      captureClicksHint: "cliques em 📸",
+      noTopData: "Ainda não há dados de óculos testados neste período.",
+    },
+    system: {
+      copyLinkManual: "Não consegui copiar o link automaticamente. Copie-o pela barra de endereços.",
+      initError: "Não consegui iniciar o FaceLens corretamente.",
     },
     whatsapp: {
       askModel: "Olá! Quero consultar este modelo: {{model}}",
@@ -934,6 +1000,10 @@ function applyStaticTranslations() {
   if (compareBBtnEl) compareBBtnEl.textContent = t("ui.saveB");
   if (productBtnEl) productBtnEl.textContent = t("ui.product");
   if (clearCompareEl) clearCompareEl.textContent = t("ui.clear");
+  const chipAEl = document.getElementById("chipA");
+  const chipBEl = document.getElementById("chipB");
+  if (chipAEl) chipAEl.textContent = `${t("compare.saveA")}: ${t("compare.empty")}`;
+  if (chipBEl) chipBEl.textContent = `${t("compare.saveB")}: ${t("compare.empty")}`;
 
   setText("searchTitle", t("search.title"));
   if (searchInputEl) searchInputEl.placeholder = t("search.placeholder");
@@ -2301,8 +2371,8 @@ function __updateCompareUI() {
   }
 
   compareChips.style.display = "flex";
-  chipA.textContent = hasA ? `A: ${__compareA.name}` : "A: —";
-  chipB.textContent = hasB ? `B: ${__compareB.name}` : "B: —";
+  chipA.textContent = hasA ? `${t("compare.saveA")}: ${__compareA.name}` : `${t("compare.saveA")}: ${t("compare.empty")}`;
+  chipB.textContent = hasB ? `${t("compare.saveB")}: ${__compareB.name}` : `${t("compare.saveB")}: ${t("compare.empty")}`;
 
   chipA.disabled = !hasA;
   chipB.disabled = !hasB;
@@ -2981,9 +3051,9 @@ function showDashboardUI(cliente) {
   const dashSub = document.getElementById("dashSub");
   const dashLogo = document.getElementById("dashLogo");
 
-  const name = String(cliente?.nombre || cliente?.name || cliente?.slug || slug || "Cliente");
-  if (dashTitle) dashTitle.textContent = `Dashboard · ${name}`;
-  if (dashSub) dashSub.textContent = `Slug: ${String(cliente?.slug || slug || "")}`;
+  const name = String(cliente?.nombre || cliente?.name || cliente?.slug || slug || t("dashboardExtra.clientFallback"));
+  if (dashTitle) dashTitle.textContent = t("dashboardExtra.titleWithName", { name });
+  if (dashSub) dashSub.textContent = t("dashboardExtra.slugLabel", { slug: String(cliente?.slug || slug || "") });
 
   const logoUrl = String(cliente?.logo_url || "").replace(/\r?\n/g, "").trim();
   if (dashLogo && logoUrl) {
@@ -3010,7 +3080,7 @@ async function loadDashboardData(cliente) {
 
   const client_slug = String(cliente?.slug || slug || "").trim();
   if (!client_slug) {
-    setDashError("No hay slug de cliente.");
+    setDashError(t("dashboardExtra.noSlug"));
     return;
   }
 
@@ -3030,7 +3100,7 @@ async function loadDashboardData(cliente) {
     .gte("created_at", since);
 
   if (baseErr) {
-    setDashError("No pude leer eventos. Revisá permisos (RLS) o políticas de lectura.");
+    setDashError(t("dashboardExtra.readError"));
     return;
   }
 
@@ -3074,16 +3144,16 @@ async function loadDashboardData(cliente) {
   const mCapHint = document.getElementById("mCapHint");
 
   if (mUsers) mUsers.textContent = String(users);
-  if (mUsersHint) mUsersHint.textContent = days === 1 ? "últimas 24h" : `últimos ${days} días`;
+  if (mUsersHint) mUsersHint.textContent = days === 1 ? t("dashboardExtra.usersHint24h") : t("dashboardExtra.usersHintDays", { days });
 
   if (mSessions) mSessions.textContent = String(sessions);
-  if (mSessionsHint) mSessionsHint.textContent = `reingresos est.: ${reing}`;
+  if (mSessionsHint) mSessionsHint.textContent = t("dashboardExtra.sessionsHint", { count: reing });
 
   if (mProd) mProd.textContent = String(productClicks);
-  if (mProdHint) mProdHint.textContent = "clics en 🛒";
+  if (mProdHint) mProdHint.textContent = t("dashboardExtra.productClicksHint");
 
   if (mCap) mCap.textContent = String(captureClicks);
-  if (mCapHint) mCapHint.textContent = "clics en 📸";
+  if (mCapHint) mCapHint.textContent = t("dashboardExtra.captureClicksHint");
 
   // UI: top lentes
   const topArr = Array.from(topMap.entries())
@@ -3097,7 +3167,7 @@ async function loadDashboardData(cliente) {
   const list = document.getElementById("dashTopLenses");
   if (list) {
     if (!topArr.length) {
-      list.innerHTML = `<div style="opacity:.8;">Todavía no hay datos de lentes probados en este período.</div>`;
+      list.innerHTML = `<div style="opacity:.8;">${t("dashboardExtra.noTopData")}</div>`;
     } else {
       list.innerHTML = topArr.map((it, i) => `
         <div class="dashRow">
@@ -3210,7 +3280,7 @@ function setupInAppBrowserNotice() {
     if (ok) {
       if (copyMsg) copyMsg.style.display = "block";
     } else {
-      alert("No pude copiar el link automáticamente. Copialo desde la barra de direcciones.");
+      alert(t("system.copyLinkManual"));
     }
   };
 
@@ -3277,7 +3347,9 @@ function maybeShowInAppBrowserNotice() {
 
   } catch (e) {
     console.error("INIT ❌", e);
-    alert(e.message || String(e));
+    alert(`${t("system.initError")}
+
+${e.message || String(e)}`);
   }
 })();
  </script>
